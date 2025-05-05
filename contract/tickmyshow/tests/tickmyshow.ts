@@ -1,147 +1,236 @@
-const anchor = require("@coral-xyz/anchor");
-const { SystemProgram, SYSVAR_CLOCK_PUBKEY } = anchor.web3;
-const { Program } = anchor;
-const assert = require("assert");
+import * as anchor from "@project-serum/anchor";
+import { Program } from "@project-serum/anchor";
+import { assert } from "chai";
+import { SystemProgram, PublicKey, Keypair } from "@solana/web3.js";
 
-// Configure the local cluster.
-const provider = anchor.AnchorProvider.local();
-anchor.setProvider(provider);
+describe("tickmyshow", () => {
+  // 1) Anchor provider
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
 
-// Assume your program workspace name is 'tickmyshow'
-const program = anchor.workspace.Tickmyshow;
+  // 2) Load program - using workspace directly with ts-ignore
+  // @ts-ignore
+  const program = anchor.workspace.Tickmyshow;
+  
+  console.log("Program ID:", program.programId.toString());
 
-// Variables to share between tests if needed
-let eventPda;
-let ticketPda;
-// Note: checkinPda derivation is tricky due to timestamp seed for 'init'.
-// See comment in check_in test for details.
-let checkinPda;
-let owner = anchor.web3.Keypair.generate(); // Keypair for the ticket owner and checkin signer
+  // keypairs
+  const creator = Keypair.generate();
+  const user1 = Keypair.generate();
+  const user2 = Keypair.generate();
 
-describe("Tickmyshow", () => {
+  // event params
+  const name = "Solana Summer Fest";
+  const date = Math.floor(Date.now() / 1000) + 3600;
+  const cap = 1;
 
-  // Airdrop SOL to the owner who will pay for ticket and checkin accounts
-  before(async () => {
-    await provider.connection.requestAirdrop(
-      owner.publicKey,
-      100 * anchor.web3.LAMPORTS_PER_SOL
+  // PDA helpers
+  const getEventPda = () =>
+    PublicKey.findProgramAddressSync(
+      [Buffer.from("event"), creator.publicKey.toBuffer(), Buffer.from(name)],
+      program.programId
     );
+
+  const getTicketPda = (ev, owner) =>
+    PublicKey.findProgramAddressSync(
+      [Buffer.from("ticket"), ev.toBuffer(), owner.toBuffer()],
+      program.programId
+    );
+
+  const getCheckinPda = (tk, ts) =>
+    PublicKey.findProgramAddressSync(
+      [Buffer.from("checkin"), tk.toBuffer(), Buffer.from(ts.toString())],
+      program.programId
+    );
+
+  // airdrop helper
+  const airdrop = async (kp) => {
+    const signature = await provider.connection.requestAirdrop(kp.publicKey, 1e9);
+    console.log(`Airdrop to ${kp.publicKey.toString().slice(0, 8)}... requested: ${signature}`);
+    
+    // Wait for confirmation
+    await provider.connection.confirmTransaction(signature, "confirmed");
+    console.log(`Airdrop to ${kp.publicKey.toString().slice(0, 8)}... confirmed`);
+  };
+
+  before(async () => {
+    console.log("Starting airdrops...");
+    // Airdrop one at a time to avoid rate limiting
+    await airdrop(creator);
+    await airdrop(user1);
+    await airdrop(user2);
+    console.log("All airdrops completed");
   });
 
-  it("Initializes an event!", async () => {
-    const eventName = "Dev Meetup";
-    const eventDate = new Date().getTime(); // Example timestamp
+  it("initializes event", async () => {
+    console.log("Creating event:", name);
+    const [evPda, evBump] = getEventPda();
+    console.log("Event PDA:", evPda.toString());
 
-    // Calculate the PDA for the event account
-    [eventPda] = anchor.web3.Pubkey.findProgramAddressSync(
-      [
-        Buffer.from("event"), // Seed: "event"
-        provider.wallet.publicKey.toBuffer(), // Seed: creator's public key (default wallet)
-        Buffer.from(eventName), // Seed: event name
-      ],
-      program.programId // Your program's public key
-    );
-
-    // Call the init_event instruction
-    await program.methods
-      .initEvent(eventName, new anchor.BN(eventDate)) // Use BN for i64
+    const tx = await program.methods
+      .initEvent(name, new anchor.BN(date), cap)
       .accounts({
-        event: eventPda,
-        creator: provider.wallet.publicKey, // Creator is the default wallet
+        event: evPda,
+        creator: creator.publicKey,
         systemProgram: SystemProgram.programId,
       })
+      .signers([creator])
       .rpc();
+    
+    console.log("Event created with tx:", tx);
 
-    // Fetch and assert the created event account data
-    const eventAccount = await program.account.event.fetch(eventPda);
-
-    assert.strictEqual(eventAccount.creator.toString(), provider.wallet.publicKey.toString());
-    assert.strictEqual(eventAccount.name, eventName);
-    assert.strictEqual(eventAccount.date.toString(), new anchor.BN(eventDate).toString());
-    // assert.strictEqual(eventAccount.bump, _eventBump); // Optionally check bump
+    // @ts-ignore
+    const ev = await program.account.event.fetch(evPda);
+    console.log("Event data:", {
+      // @ts-ignore
+      creator: ev.creator.toString(),
+      // @ts-ignore
+      name: ev.name,
+      // @ts-ignore
+      date: ev.date.toString(),
+      // @ts-ignore
+      capacity: ev.capacity,
+      // @ts-ignore
+      issued: ev.issued,
+    });
+    
+    // @ts-ignore
+    assert.ok(ev.creator.equals(creator.publicKey));
+    // @ts-ignore
+    assert.strictEqual(ev.name, name);
+    // @ts-ignore
+    assert.ok(ev.date.eq(new anchor.BN(date)));
+    // @ts-ignore
+    assert.strictEqual(ev.capacity, cap);
+    // @ts-ignore
+    assert.strictEqual(ev.issued, 0);
+    // @ts-ignore
+    assert.strictEqual(ev.bump, evBump);
   });
 
-  it("Mints a ticket for the event!", async () => {
-    // Ensure eventPda is set from the previous test or a fixture
-    if (!eventPda) {
-      throw new Error("Event not initialized before minting ticket.");
-    }
+  it("mints a ticket", async () => {
+    console.log("Minting ticket for user1");
+    const [evPda] = getEventPda();
+    const [tkPda, tkB] = getTicketPda(evPda, user1.publicKey);
+    console.log("Ticket PDA:", tkPda.toString());
 
-    // Calculate the PDA for the ticket account
-    [ticketPda] = anchor.web3.Pubkey.findProgramAddressSync(
-      [
-        Buffer.from("ticket"), // Seed: "ticket"
-        eventPda.toBuffer(), // Seed: event's public key (PDA)
-        owner.publicKey.toBuffer(), // Seed: owner's public key (new Keypair)
-      ],
-      program.programId // Your program's public key
-    );
-
-    // Call the mint_ticket instruction
-    await program.methods
+    const tx = await program.methods
       .mintTicket()
       .accounts({
-        ticket: ticketPda,
-        owner: owner.publicKey, // Owner is the signer/payer for the ticket
-        event: eventPda, // Pass the event PDA key
+        ticket: tkPda,
+        owner: user1.publicKey,
+        event: evPda,
         systemProgram: SystemProgram.programId,
       })
-      .signers([owner]) // Owner must sign the transaction
+      .signers([user1])
       .rpc();
+    
+    console.log("Ticket minted with tx:", tx);
 
-    // Fetch and assert the created ticket account data
-    const ticketAccount = await program.account.ticket.fetch(ticketPda);
-
-    assert.strictEqual(ticketAccount.event.toString(), eventPda.toString());
-    assert.strictEqual(ticketAccount.owner.toString(), owner.publicKey.toString());
-    // assert.strictEqual(ticketAccount.bump, _ticketBump); // Optionally check bump
+    // @ts-ignore
+    const tk = await program.account.ticket.fetch(tkPda);
+    // @ts-ignore
+    const ev = await program.account.event.fetch(evPda);
+    
+    console.log("Ticket data:", {
+      // @ts-ignore
+      event: tk.event.toString(),
+      // @ts-ignore
+      owner: tk.owner.toString(),
+    });
+    
+    console.log("Updated event data:", {
+      // @ts-ignore
+      issued: ev.issued,
+    });
+    
+    // @ts-ignore
+    assert.ok(tk.event.equals(evPda));
+    // @ts-ignore
+    assert.ok(tk.owner.equals(user1.publicKey));
+    // @ts-ignore
+    assert.strictEqual(tk.bump, tkB);
+    // @ts-ignore
+    assert.strictEqual(ev.issued, 1);
   });
 
-  it("Checks in a ticket!", async () => {
-      // Ensure ticketPda and owner are set from the previous test or a fixture
-      if (!ticketPda || !owner) {
-          throw new Error("Ticket not minted before check-in.");
-      }
+  it("fails when sold out", async () => {
+    console.log("Attempting to mint ticket for user2 (should fail - sold out)");
+    const [evPda] = getEventPda();
+    const [tk2Pda] = getTicketPda(evPda, user2.publicKey);
+    console.log("Ticket2 PDA:", tk2Pda.toString());
 
-      // Calculate the PDA for the checkin account.
-      // NOTE: Your Rust code uses `&clock.unix_timestamp.to_le_bytes()` as a seed for an `init` PDA.
-      // Deriving the *exact* timestamp seed deterministically *before* the transaction hits the block
-      // is not reliably possible in a standard test setup.
-      // The test below uses a simplified PDA calculation based only on ticketPda for demonstration.
-      // If your Rust checkin PDA *must* include timestamp as a seed for `init`, the test needs
-      // a different PDA definition in Rust (e.g., without timestamp in address) or a more complex testing approach.
-      [checkinPda] = anchor.web3.Pubkey.findProgramAddressSync(
-          [
-              Buffer.from("checkin"), // Seed: "checkin"
-              ticketPda.toBuffer(),   // Seed: ticket's public key (PDA)
-              // Omit timestamp seed here as it's not predictable before txn
-              // If your Rust code used [b"checkin", ticket.key().as_ref()], this would be correct.
-          ],
-          program.programId
-      );
+    try {
+      const tx = await program.methods
+        .mintTicket()
+        .accounts({
+          ticket: tk2Pda,
+          owner: user2.publicKey,
+          event: evPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([user2])
+        .rpc();
+      
+      console.log("Unexpected success:", tx);
+      assert.fail("Expected SoldOut error");
+    } catch (err) {
+      console.log("Got expected error:", err.toString().slice(0, 100) + "...");
+      assert.include(err.toString(), "SoldOut");
+    }
 
-
-      // Call the check_in instruction
-      await program.methods
-          .checkIn()
-          .accounts({
-              checkin: checkinPda,
-              owner: owner.publicKey, // Owner is the signer for checkin
-              ticket: ticketPda,    // Pass the ticket PDA key
-              clock: SYSVAR_CLOCK_PUBKEY, // Use the Clock sysvar
-              systemProgram: SystemProgram.programId,
-          })
-          .signers([owner]) // Owner must sign
-          .rpc();
-
-      // Fetch and assert the created checkin account data
-      const checkinAccount = await program.account.checkInData.fetch(checkinPda);
-
-      // Verify the data written to the account
-      assert.strictEqual(checkinAccount.ticket.toString(), ticketPda.toString());
-      assert.strictEqual(checkinAccount.owner.toString(), owner.publicKey.toString());
-      assert.ok(checkinAccount.timestamp > 0); // Check that a timestamp was recorded
-      // assert.strictEqual(checkinAccount.bump, _checkinBump); // Optionally check bump
+    // @ts-ignore
+    const ev = await program.account.event.fetch(evPda);
+    // @ts-ignore
+    console.log("Event issued count still:", ev.issued);
+    // @ts-ignore
+    assert.strictEqual(ev.issued, 1);
   });
 
+  it("checks in a ticket", async () => {
+    console.log("Checking in ticket for user1");
+    const [evPda] = getEventPda();
+    const [tkPda] = getTicketPda(evPda, user1.publicKey);
+
+    const ts = Math.floor(Date.now() / 1000);
+    const [ciPda, ciB] = getCheckinPda(tkPda, ts);
+    console.log("CheckIn PDA:", ciPda.toString());
+    console.log("Current timestamp:", ts);
+
+    const tx = await program.methods
+      .checkIn()
+      .accounts({
+        checkin: ciPda,
+        owner: user1.publicKey,
+        ticket: tkPda,
+        clock: anchor.web3.SYSVAR_CLOCK_PUBKEY,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([user1])
+      .rpc();
+    
+    console.log("Check-in completed with tx:", tx);
+
+    // @ts-ignore
+    const ci = await program.account.checkInData.fetch(ciPda);
+    console.log("CheckIn data:", {
+      // @ts-ignore
+      ticket: ci.ticket.toString(),
+      // @ts-ignore
+      owner: ci.owner.toString(),
+      // @ts-ignore
+      timestamp: ci.timestamp.toString(),
+    });
+    
+    // @ts-ignore
+    assert.ok(ci.ticket.equals(tkPda));
+    // @ts-ignore
+    assert.ok(ci.owner.equals(user1.publicKey));
+    // @ts-ignore
+    assert.strictEqual(ci.bump, ciB);
+    // @ts-ignore
+    assert.ok(ci.timestamp.toNumber() <= ts + 10);
+    
+    console.log("✅ All tests passed successfully!");
+  });
 });
