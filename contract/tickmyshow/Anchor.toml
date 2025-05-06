@@ -4,6 +4,7 @@ package_manager = "yarn"
 [features]
 resolution = true
 skip-lint = false
+seeds = true
 
 [programs.localnet]
 tickmyshow = "5FFwn1xD4ae3kttPDNoHmnW2x2tfekLQXUbRiaj6mBeG"
@@ -12,6 +13,6 @@ tickmyshow = "5FFwn1xD4ae3kttPDNoHmnW2x2tfekLQXUbRiaj6mBeG"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
