@@ -9,6 +9,7 @@ import {
 } from "@solana/wallet-adapter-react-ui";
 import { clusterApiUrl } from "@solana/web3.js";
 import "@solana/wallet-adapter-react-ui/styles.css";
+import CreateEvent from "./create";
 
 
 
@@ -27,7 +28,7 @@ export default function Home () {
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
           <WalletMultiButton />
-          <h1>Hello Solana</h1>
+            <CreateEvent/>
         </WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>
