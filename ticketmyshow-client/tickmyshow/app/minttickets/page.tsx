@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useMemo } from "react";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { AnchorProvider, Program } from "@coral-xyz/anchor";
 import { IDL, PROGRAM_ID, Tickmyshow } from "../anchor/setup";
@@ -8,65 +8,62 @@ import WalletMultiButton from "../components/walletbutton";
 
 type FetchProps = {
   program: Program<Tickmyshow> | null;
-  event: any;
-  onSetEvent: (evt: any) => void;
-  onMint: (eventData: any) => Promise<void>;
-  pdaInput: any;
-  setEventPda: any;
-  setEventAccount: any; 
+  eventAccount: any;
+  eventPda: PublicKey | null;
+  setEventAccount: (evt: any) => void;
+  setEventPda: (pda: PublicKey) => void;
 };
 
-const FetchPdakey = ({ program, event, onSetEvent, onMint, pdaInput, setEventPda, setEventAccount }: FetchProps) => {
-  const [pda, setPda] = useState("");
+const FetchPdakey = ({
+  program,
+  eventAccount,
+  eventPda,
+  setEventAccount,
+  setEventPda,
+}: FetchProps) => {
+  const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  async function fetchEvent() {
+  const fetchEvent = async () => {
+    if (!program) {
+      setError("Program not ready");
+      return;
+    }
     try {
-      if (!program) return setError("Program not ready");
-      const pubkey = new PublicKey(pda);
-      const fetchedEvent = await (program as any).account.event.fetch(pubkey);
-      async function fetchEvent() {
-        const pubkey = new PublicKey(pdaInput);
-        const acc = await (program as any).account.event.fetch(pubkey);
-        setEventPda(pubkey);
-        setEventAccount(acc);
-      }
-      onSetEvent(fetchedEvent);
+      const pubkey = new PublicKey(input);
+      const account = await (program as any).account.event.fetch(pubkey);
+      setEventPda(pubkey);
+      setEventAccount(account);
       setError(null);
     } catch {
-      setError("Event not found or invalid PDA");
-      onSetEvent(null);
+      setError("Invalid PDA or event not found");
+      setEventAccount(null);
+      setEventPda(null as any);
     }
-  }
+  };
 
   return (
-    <div className="flex flex-col gap-4 justify-center items-center p-4 ">
-      <div>🎟️ Mint your Tickets for an Event</div>
-      <label>Enter Event PDA</label>
+    <div className="space-y-4 p-4  rounded">
+      <h2 className="text-lg font-medium">Find Event</h2>
       <input
-        type="text"
-        value={pda}
-        onChange={(e) => setPda(e.target.value)}
-        className="w-80 p-2 border rounded"
+        className="w-full p-2 border rounded"
+        placeholder="Enter Event PDA"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
       />
       <button
         onClick={fetchEvent}
-        className="px-4 py-2 bg-blue-600 text-white rounded"
+        className="w-full px-4 py-2 bg-blue-600 text-white rounded"
       >
-        Find Event
+        Load Event
       </button>
       {error && <p className="text-red-500">{error}</p>}
-      {event && (
-        <div className="mt-4 p-4 bg-white rounded shadow w-80">
-          <p><strong>Name:</strong> {event.name}</p>
-          <p><strong>Date:</strong> {new Date(event.date.toNumber() * 1000).toLocaleString()}</p>
-          <p><strong>Capacity:</strong> {event.capacity.toString()}</p>
-          <button
-            className="mt-2 px-4 py-2 bg-green-600 text-white rounded"
-            onClick={() => onMint(event)}
-          >
-            Get Tickets
-          </button>
+
+      {eventAccount && eventPda && (
+        <div className="p-4 bg-white text-black rounded shadow">
+          <p><strong>Name:</strong> {eventAccount.name}</p>
+          <p><strong>Date:</strong> {new Date(eventAccount.date.toNumber() * 1000).toLocaleString()}</p>
+          <p><strong>Issued / Capacity:</strong> {eventAccount.issued.toString()} / {eventAccount.capacity.toString()}</p>
         </div>
       )}
     </div>
@@ -74,12 +71,12 @@ const FetchPdakey = ({ program, event, onSetEvent, onMint, pdaInput, setEventPda
 };
 
 export default function MintTicketsPage() {
-    const [eventAccount, setEventAccount] = useState<any>(null);
-    const [eventPda, setEventPda] = useState<PublicKey | null>(null);
-  const [event, setEvent] = useState<any>(null);
+  const [eventAccount, setEventAccount] = useState<any>(null);
+  const [eventPda, setEventPda] = useState<PublicKey | null>(null);
+  const [quantity, setQty] =  useState(0);
+
   const { connection } = useConnection();
   const { publicKey, signTransaction, signAllTransactions, connected } = useWallet();
-
   const wallet = publicKey && signTransaction && signAllTransactions
     ? { publicKey, signTransaction, signAllTransactions }
     : null;
@@ -91,34 +88,52 @@ export default function MintTicketsPage() {
 
   const program = useMemo(() => {
     if (!provider) return null;
-    return new Program<Tickmyshow>(IDL,  provider);
+    return new Program<Tickmyshow>(IDL, provider);
   }, [provider]);
 
-  const handleMint = async (eventData: any) => {
+  const handleMint = async () => {
     if (!program || !publicKey) {
-      alert("Please connect your wallet first!");
+      alert("Connect wallet first");
+      return;
+    }
+    if (!eventPda) {
+      alert("Load an event first");
       return;
     }
     try {
-      const eventPDA = eventData.publicKey;
+
+        const lamports = await connection.getBalance(publicKey);
+        const sol = lamports / LAMPORTS_PER_SOL;
+        
+        if (sol < 0.01) {
+        
+            return (<div> Insufficient Balance for this transaction!!! </div>);
+          }
+
       const [ticketPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from("ticket"), eventPda.toBuffer(), publicKey.toBuffer()],
         PROGRAM_ID
       );
-
+      const existing = await (program as any).account.ticket.fetchNullable(ticketPDA);
+      if (existing) {
+        alert("You already have a ticket for this event!");
+        return;
+      }
       const tx = await program.methods
         .mintTicket()
         .accounts({
           ticket: ticketPDA,
           owner: publicKey,
-          event: eventPDA,
+          event: eventPda,
           systemProgram: PublicKey.default,
         })
         .rpc();
 
-      alert(`Minted! TX: ${tx}`);
-      const updated = await (program as any).account.event.fetch(eventPDA);
-      setEvent(updated);
+      alert(`Ticket minted!\nTX: ${tx}`);
+      const updated = await (program as any).account.event.fetch(eventPda);
+      setEventAccount(updated);
+      console.log("tickets minted: ",tx)
+      
     } catch (err: any) {
       console.error(err);
       alert("Mint failed: " + (err.message || err.toString()));
@@ -126,20 +141,32 @@ export default function MintTicketsPage() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-6 space-y-6">
       <WalletMultiButton />
       {!connected ? (
-        <p className="mt-4 text-gray-700">Please connect your wallet to proceed.</p>
+        <p>Please connect your wallet to proceed.</p>
       ) : (
-        <FetchPdakey
-          program={program}
-          event={event}
-          onSetEvent={setEvent}
-          onMint={handleMint}
-          setEventAccount
-          setEventPda
-          pdaInput
-        />
+        <>
+          <FetchPdakey
+            program={program}
+            eventAccount={eventAccount}
+            eventPda={eventPda}
+            setEventAccount={setEventAccount}
+            setEventPda={setEventPda}
+          />
+          {eventAccount && eventPda && (
+            <>
+          
+            <button
+              onClick={handleMint}
+              className="w-full px-4 py-2 bg-green-600 text-white rounded"
+            >
+              Mint Ticket (Max 1)
+            </button>
+            </>
+          )}
+          {tx && <><div>your Ticket: </div> tx </>}
+        </>
       )}
     </div>
   );
