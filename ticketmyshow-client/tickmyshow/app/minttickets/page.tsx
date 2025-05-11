@@ -4,17 +4,17 @@ import {
   PublicKey, 
   LAMPORTS_PER_SOL, 
   SystemProgram, 
-  Keypair, // For generating the new NFT mint's keypair
-  SYSVAR_RENT_PUBKEY // For rent exemption
+  Keypair, 
+  SYSVAR_RENT_PUBKEY
 } from "@solana/web3.js";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { AnchorProvider, Program, web3 } from "@coral-xyz/anchor";
-import { IDL, PROGRAM_ID as TICKMYSHOW_PROGRAM_ID, Tickmyshow } from "../anchor/setup"; // Your Anchor program's IDL and Program ID
+import { IDL, PROGRAM_ID as TICKMYSHOW_PROGRAM_ID, Tickmyshow } from "../anchor/setup"; 
 import WalletMultiButton from "../components/walletbutton";
 import { 
   TOKEN_PROGRAM_ID, 
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync // To derive Associated Token Account
+  getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 
 // Metaplex Token Metadata Program ID (constant)
@@ -22,8 +22,6 @@ const MPL_TOKEN_METADATA_PROGRAM_ID = new PublicKey(
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 );
 
-// Note: Minting NFTs is inherently more complex than simple PDA creation,
-// involving more accounts and on-chain interactions, which leads to more client-side setup.
 
 type FetchProps = {
   program: Program<Tickmyshow> | null;
@@ -57,7 +55,7 @@ const FetchPdakey = ({
     setError(null);
     try {
       const pubkey = new PublicKey(input);
-      const account = await program.account.event.fetch(pubkey);
+      const account = await (program as any).account.event.fetch(pubkey);
       setEventPda(pubkey);
       setEventAccount(account);
     } catch (e) {

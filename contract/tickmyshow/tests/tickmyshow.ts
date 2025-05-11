@@ -1,236 +1,274 @@
 import * as anchor from "@project-serum/anchor";
 import { Program } from "@project-serum/anchor";
+import { Tickmyshow } from "../target/types/tickmyshow";
 import { assert } from "chai";
-import { SystemProgram, PublicKey, Keypair } from "@solana/web3.js";
+import {
+  PublicKey,
+  SystemProgram,
+  Keypair,
+  SYSVAR_RENT_PUBKEY,
+  SYSVAR_CLOCK_PUBKEY,
+} from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  createMint,
+  getOrCreateAssociatedTokenAccount,
+} from "@solana/spl-token";
 
 describe("tickmyshow", () => {
-  // 1) Anchor provider
+  // Configure the client to use the local cluster.
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
+  const program = anchor.workspace.Tickmyshow as Program<Tickmyshow>;
 
-  // 2) Load program - using workspace directly with ts-ignore
-  // @ts-ignore
-  const program = anchor.workspace.Tickmyshow;
+  // PDAs and bumps
+  let eventPda: PublicKey, eventBump: number;
+  let ticketPda: PublicKey, ticketBump: number;
+  let entryPda: PublicKey, entryBump: number;
+  let checkinPda: PublicKey, checkinBump: number;
+
+  // Common parameters
+  const name = "My Concert";
+  const date = Math.floor(Date.now() / 1000) + 3600; // 1h from now
+  const capacity = 2;
+
+  // Will hold the NFT mint and ATA across tests
+  let nftMint: PublicKey;
+  let buyerAta: PublicKey;
+
+  it("initializes an event", async () => {
+    // Derive event PDA
+    [eventPda, eventBump] = await PublicKey.findProgramAddress(
+      [
+        Buffer.from("event"),
+        Buffer.from(name),
+        Buffer.from(new anchor.BN(date).toArray("le", 8)),
+      ],
+      program.programId
+    );
+
+    // Call init_event
+    await program.methods
+      .initEvent(name, new anchor.BN(date), capacity)
+      .accounts({
+        event: eventPda,
+        creator: provider.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Fetch and assert
+    const eventAcc = await program.account.event.fetch(eventPda);
+    assert.equal(eventAcc.creator.toBase58(), provider.wallet.publicKey.toBase58());
+    assert.equal(eventAcc.name, name);
+    assert.equal(eventAcc.date.toNumber(), date);
+    assert.equal(eventAcc.capacity, capacity);
+    assert.equal(eventAcc.issuedNfts, 0);
+    assert.equal(eventAcc.bump, eventBump);
+  });
+
+  it("mints an NFT ticket", async () => {
+    // 1) Create a new mint
+    nftMint = await createMint(
+      provider.connection,
+      provider.wallet,
+      provider.wallet.publicKey,
+      provider.wallet.publicKey,
+      0
+    );
+
+    // 2) Create buyer ATA
+    const ata = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      provider.wallet,
+      nftMint,
+      provider.wallet.publicKey
+    );
+    buyerAta = ata.address;
+
+    // 3) Generate dummy metadata + master edition PDAs
+    const metadata = Keypair.generate().publicKey;
+    const masterEdition = Keypair.generate().publicKey;
+
+    // 4) Derive ticket PDA
+    [ticketPda, ticketBump] = await PublicKey.findProgramAddress(
+      [Buffer.from("ticket"), eventPda.toBuffer(), nftMint.toBuffer()],
+      program.programId
+    );
+
+    // 5) Call mint_nft_ticket
+    await program.methods
+      .mintNftTicket("https://uri.test", "ConcertTicket", "CTS")
+      .accounts({
+        payer: provider.wallet.publicKey,
+        event: eventPda,
+        nftMint,
+        nftAccount: buyerAta,
+        metadata,
+        masterEdition,
+        ticket: ticketPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenMetadataProgram: program.programId, // local tests use programId
+        systemProgram: SystemProgram.programId,
+        rent: SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+
+    // 6) Fetch and assert ticket
+    const ticketAcc = await program.account.ticket.fetch(ticketPda);
+    assert.equal(ticketAcc.event.toBase58(), eventPda.toBase58());
+    assert.equal(ticketAcc.owner.toBase58(), provider.wallet.publicKey.toBase58());
+    assert.equal(ticketAcc.nftMint.toBase58(), nftMint.toBase58());
+    assert.equal(ticketAcc.nftAccount.toBase58(), buyerAta.toBase58());
+    assert.isFalse(ticketAcc.checkedIn);
+    assert.equal(ticketAcc.bump, ticketBump);
+
+    // 7) Ensure event.issued_nfts == 1
+    const evt = await program.account.event.fetch(eventPda);
+    assert.equal(evt.issuedNfts, 1);
+  });
+
+  it("prevents minting past capacity", async () => {
   
-  console.log("Program ID:", program.programId.toString());
-
-  // keypairs
-  const creator = Keypair.generate();
-  const user1 = Keypair.generate();
-  const user2 = Keypair.generate();
-
-  // event params
-  const name = "Solana Summer Fest";
-  const date = Math.floor(Date.now() / 1000) + 3600;
-  const cap = 1;
-
-  // PDA helpers
-  const getEventPda = () =>
-    PublicKey.findProgramAddressSync(
-      [Buffer.from("event"), creator.publicKey.toBuffer(), Buffer.from(name)],
+    const nft2 = await createMint(
+      provider.connection,
+      provider.wallet,
+      provider.wallet.publicKey,
+      provider.wallet.publicKey,
+      0
+    );
+    const ata2 = (await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      provider.wallet,
+      nft2,
+      provider.wallet.publicKey
+    )).address;
+    const meta2 = Keypair.generate().publicKey;
+    const me2 = Keypair.generate().publicKey;
+    const [tick2, b2] = await PublicKey.findProgramAddress(
+      [Buffer.from("ticket"), eventPda.toBuffer(), nft2.toBuffer()],
       program.programId
     );
 
-  const getTicketPda = (ev, owner) =>
-    PublicKey.findProgramAddressSync(
-      [Buffer.from("ticket"), ev.toBuffer(), owner.toBuffer()],
-      program.programId
-    );
-
-  const getCheckinPda = (tk, ts) =>
-    PublicKey.findProgramAddressSync(
-      [Buffer.from("checkin"), tk.toBuffer(), Buffer.from(ts.toString())],
-      program.programId
-    );
-
-  // airdrop helper
-  const airdrop = async (kp) => {
-    const signature = await provider.connection.requestAirdrop(kp.publicKey, 1e9);
-    console.log(`Airdrop to ${kp.publicKey.toString().slice(0, 8)}... requested: ${signature}`);
-    
-    // Wait for confirmation
-    await provider.connection.confirmTransaction(signature, "confirmed");
-    console.log(`Airdrop to ${kp.publicKey.toString().slice(0, 8)}... confirmed`);
-  };
-
-  before(async () => {
-    console.log("Starting airdrops...");
-    // Airdrop one at a time to avoid rate limiting
-    await airdrop(creator);
-    await airdrop(user1);
-    await airdrop(user2);
-    console.log("All airdrops completed");
-  });
-
-  it("initializes event", async () => {
-    console.log("Creating event:", name);
-    const [evPda, evBump] = getEventPda();
-    console.log("Event PDA:", evPda.toString());
-
-    const tx = await program.methods
-      .initEvent(name, new anchor.BN(date), cap)
+    await program.methods
+      .mintNftTicket("uri2", "T2", "T2")
       .accounts({
-        event: evPda,
-        creator: creator.publicKey,
+        payer: provider.wallet.publicKey,
+        event: eventPda,
+        nftMint: nft2,
+        nftAccount: ata2,
+        metadata: meta2,
+        masterEdition: me2,
+        ticket: tick2,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenMetadataProgram: program.programId,
         systemProgram: SystemProgram.programId,
+        rent: SYSVAR_RENT_PUBKEY,
       })
-      .signers([creator])
       .rpc();
-    
-    console.log("Event created with tx:", tx);
 
-    // @ts-ignore
-    const ev = await program.account.event.fetch(evPda);
-    console.log("Event data:", {
-      // @ts-ignore
-      creator: ev.creator.toString(),
-      // @ts-ignore
-      name: ev.name,
-      // @ts-ignore
-      date: ev.date.toString(),
-      // @ts-ignore
-      capacity: ev.capacity,
-      // @ts-ignore
-      issued: ev.issued,
-    });
-    
-    // @ts-ignore
-    assert.ok(ev.creator.equals(creator.publicKey));
-    // @ts-ignore
-    assert.strictEqual(ev.name, name);
-    // @ts-ignore
-    assert.ok(ev.date.eq(new anchor.BN(date)));
-    // @ts-ignore
-    assert.strictEqual(ev.capacity, cap);
-    // @ts-ignore
-    assert.strictEqual(ev.issued, 0);
-    // @ts-ignore
-    assert.strictEqual(ev.bump, evBump);
-  });
-
-  it("mints a ticket", async () => {
-    console.log("Minting ticket for user1");
-    const [evPda] = getEventPda();
-    const [tkPda, tkB] = getTicketPda(evPda, user1.publicKey);
-    console.log("Ticket PDA:", tkPda.toString());
-
-    const tx = await program.methods
-      .mintTicket()
-      .accounts({
-        ticket: tkPda,
-        owner: user1.publicKey,
-        event: evPda,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([user1])
-      .rpc();
-    
-    console.log("Ticket minted with tx:", tx);
-
-    // @ts-ignore
-    const tk = await program.account.ticket.fetch(tkPda);
-    // @ts-ignore
-    const ev = await program.account.event.fetch(evPda);
-    
-    console.log("Ticket data:", {
-      // @ts-ignore
-      event: tk.event.toString(),
-      // @ts-ignore
-      owner: tk.owner.toString(),
-    });
-    
-    console.log("Updated event data:", {
-      // @ts-ignore
-      issued: ev.issued,
-    });
-    
-    // @ts-ignore
-    assert.ok(tk.event.equals(evPda));
-    // @ts-ignore
-    assert.ok(tk.owner.equals(user1.publicKey));
-    // @ts-ignore
-    assert.strictEqual(tk.bump, tkB);
-    // @ts-ignore
-    assert.strictEqual(ev.issued, 1);
-  });
-
-  it("fails when sold out", async () => {
-    console.log("Attempting to mint ticket for user2 (should fail - sold out)");
-    const [evPda] = getEventPda();
-    const [tk2Pda] = getTicketPda(evPda, user2.publicKey);
-    console.log("Ticket2 PDA:", tk2Pda.toString());
-
+    // Third mint should fail SoldOut
     try {
-      const tx = await program.methods
-        .mintTicket()
+      const nft3 = await createMint(
+        provider.connection,
+        provider.wallet,
+        provider.wallet.publicKey,
+        provider.wallet.publicKey,
+        0
+      );
+      const ata3 = (await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        provider.wallet,
+        nft3,
+        provider.wallet.publicKey
+      )).address;
+      const meta3 = Keypair.generate().publicKey;
+      const me3 = Keypair.generate().publicKey;
+      const [tick3] = await PublicKey.findProgramAddress(
+        [Buffer.from("ticket"), eventPda.toBuffer(), nft3.toBuffer()],
+        program.programId
+      );
+      await program.methods
+        .mintNftTicket("uri3", "T3", "T3")
         .accounts({
-          ticket: tk2Pda,
-          owner: user2.publicKey,
-          event: evPda,
+          payer: provider.wallet.publicKey,
+          event: eventPda,
+          nftMint: nft3,
+          nftAccount: ata3,
+          metadata: meta3,
+          masterEdition: me3,
+          ticket: tick3,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenMetadataProgram: program.programId,
           systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
         })
-        .signers([user2])
         .rpc();
-      
-      console.log("Unexpected success:", tx);
       assert.fail("Expected SoldOut error");
-    } catch (err) {
-      console.log("Got expected error:", err.toString().slice(0, 100) + "...");
-      assert.include(err.toString(), "SoldOut");
+    } catch (err: any) {
+      assert.include(err.error.errorMessage, "SoldOut");
     }
-
-    // @ts-ignore
-    const ev = await program.account.event.fetch(evPda);
-    // @ts-ignore
-    console.log("Event issued count still:", ev.issued);
-    // @ts-ignore
-    assert.strictEqual(ev.issued, 1);
   });
 
-  it("checks in a ticket", async () => {
-    console.log("Checking in ticket for user1");
-    const [evPda] = getEventPda();
-    const [tkPda] = getTicketPda(evPda, user1.publicKey);
+  it("assigns an entrypoint and checks in", async () => {
+    // 1) Derive gate PDA
+    const entryId = "gate1";
+    [entryPda, entryBump] = await PublicKey.findProgramAddress(
+      [Buffer.from("entrypoint"), eventPda.toBuffer(), Buffer.from(entryId)],
+      program.programId
+    );
 
+    // 2) assign_entrypoint
+    await program.methods
+      .assignEntrypoint(entryId, provider.wallet.publicKey)
+      .accounts({
+        creator: provider.wallet.publicKey,
+        event: eventPda,
+        gate: entryPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // 3) Derive checkin PDA (use a fixed timestamp to match seeds)
     const ts = Math.floor(Date.now() / 1000);
-    const [ciPda, ciB] = getCheckinPda(tkPda, ts);
-    console.log("CheckIn PDA:", ciPda.toString());
-    console.log("Current timestamp:", ts);
+    [checkinPda, checkinBump] = await PublicKey.findProgramAddress(
+      [
+        Buffer.from("checkin"),
+        ticketPda.toBuffer(),
+        Buffer.from(new anchor.BN(ts).toArray("le", 8)),
+      ],
+      program.programId
+    );
 
-    const tx = await program.methods
+    // 4) check_in
+    await program.methods
       .checkIn()
       .accounts({
-        checkin: ciPda,
-        owner: user1.publicKey,
-        ticket: tkPda,
-        clock: anchor.web3.SYSVAR_CLOCK_PUBKEY,
+        event: eventPda,
+        gate: entryPda,
+        gateAgent: provider.wallet.publicKey,
+        nftMint,
+        nftAccount: buyerAta,
+        ticket: ticketPda,
+        checkin: checkinPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        clock: SYSVAR_CLOCK_PUBKEY,
         systemProgram: SystemProgram.programId,
       })
-      .signers([user1])
       .rpc();
-    
-    console.log("Check-in completed with tx:", tx);
 
-    // @ts-ignore
-    const ci = await program.account.checkInData.fetch(ciPda);
-    console.log("CheckIn data:", {
-      // @ts-ignore
-      ticket: ci.ticket.toString(),
-      // @ts-ignore
-      owner: ci.owner.toString(),
-      // @ts-ignore
-      timestamp: ci.timestamp.toString(),
-    });
-    
-    // @ts-ignore
-    assert.ok(ci.ticket.equals(tkPda));
-    // @ts-ignore
-    assert.ok(ci.owner.equals(user1.publicKey));
-    // @ts-ignore
-    assert.strictEqual(ci.bump, ciB);
-    // @ts-ignore
-    assert.ok(ci.timestamp.toNumber() <= ts + 10);
-    
-    console.log("✅ All tests passed successfully!");
+    // 5) Fetch and assert check‑in log
+    const ci = await program.account.checkInData.fetch(checkinPda);
+    assert.equal(ci.ticket.toBase58(), ticketPda.toBase58());
+    assert.equal(ci.owner.toBase58(), provider.wallet.publicKey.toBase58());
+    assert.equal(ci.bump, checkinBump);
+
+    // 6) Ticket must now be marked checked_in = true
+    const ticketAfter = await program.account.ticket.fetch(ticketPda);
+    assert.isTrue(ticketAfter.checkedIn);
   });
 });
