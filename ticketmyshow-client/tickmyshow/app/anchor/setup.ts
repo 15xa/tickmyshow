@@ -1,50 +1,53 @@
-import { PublicKey } from "@solana/web3.js";
-import { AnchorProvider, Program, Idl } from "@coral-xyz/anchor";
+// anchor/setup.ts
+
 import { useMemo } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import {
+  useConnection,
+  useWallet,
+  WalletContextState,
+} from "@solana/wallet-adapter-react";
+import { AnchorProvider, Program, Idl } from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 
-// Anchor-generated IDL
+// 1️⃣ Import your JSON IDL directly
 import idl from "./idl.json";
 
-/**
- * Expose the raw IDL for clients
- */
-export const IDL = idl as Idl;
+// 2️⃣ Export the on-chain program ID
+export const PROGRAM_ID = new PublicKey(idl.address);
 
-/**
- * Strongly-typed Program interface
- */
-export type Tickmyshow = Program<Idl>;
+// 3️⃣ Until you generate real TS types, alias it:
+export type Tickmyshow = Idl;
 
-/**
- * Program ID for on-chain deployment
- */
-export const PROGRAM_ID = new PublicKey("5FFwn1xD4ae3kttPDNoHmnW2x2tfekLQXUbRiaj6mBeG");
-
-/**
- * React hook to initialize Anchor Provider and Program
- */
-export function useAnchorProgram() {
+// 4️⃣ Hook that gives you `program`, `provider`, and `wallet`—all correctly typed
+export function useAnchorProgram(): {
+  program: Program<Tickmyshow> | null;
+  provider: AnchorProvider | null;
+  wallet: WalletContextState;
+} {
   const { connection } = useConnection();
   const wallet = useWallet();
 
-  const provider = useMemo(() => {
+  // AnchorProvider wrapped in useMemo to avoid re-instantiating
+  const provider = useMemo<AnchorProvider | null>(() => {
     if (!wallet.publicKey) return null;
     return new AnchorProvider(connection, wallet as any, {
       commitment: "confirmed",
     });
   }, [connection, wallet]);
 
-  const program = useMemo(() => {
+  // Program<Tickmyshow> wrapped in useMemo too
+  const program = useMemo<Program<Tickmyshow> | null>(() => {
     if (!provider) return null;
-    return new Program(IDL,  provider) as Program<Idl>;
+    return new Program<Tickmyshow>(idl as unknown as Idl, provider);
   }, [provider]);
 
-  return { program: program as Program<Idl>, provider, wallet };
+  return { program, provider, wallet };
 }
 
+// 5️⃣ Your PDA helpers, untouched from before:
 
+/** Event PDA: seeds = ["event", name, date] */
 export function getEventPDA(
   name: string,
   date: number
@@ -59,9 +62,7 @@ export function getEventPDA(
   );
 }
 
-/**
- * Derive Ticket PDA: ["ticket", eventPubkey, nftMintPubkey]
- */
+/** Ticket PDA: seeds = ["ticket", eventPubkey, nftMintPubkey] */
 export function getTicketPDA(
   event: PublicKey,
   nftMint: PublicKey
@@ -72,22 +73,21 @@ export function getTicketPDA(
   );
 }
 
-/**
- * Derive GateAuthority PDA: ["entrypoint", eventPubkey, entrypointId]
- */
+/** Gate PDA: seeds = ["entrypoint", eventPubkey, entrypointId] */
 export function getGatePDA(
   event: PublicKey,
   entrypointId: string
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("entrypoint"), event.toBuffer(), Buffer.from(entrypointId)],
+    [
+      Buffer.from("entrypoint"),
+      event.toBuffer(),
+      Buffer.from(entrypointId),
+    ],
     PROGRAM_ID
   );
 }
 
-/**
- * Derive CheckInData PDA: ["checkin", ticketPubkey, timestamp_le_8bytes]
- */
 export function getCheckinPDA(
   ticket: PublicKey,
   timestamp: number
