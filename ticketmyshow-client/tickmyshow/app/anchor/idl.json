@@ -2,216 +2,10 @@
   "address": "5FFwn1xD4ae3kttPDNoHmnW2x2tfekLQXUbRiaj6mBeG",
   "metadata": {
     "name": "tickmyshow",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "spec": "0.1.0"
   },
   "instructions": [
-    {
-      "name": "assign_entrypoint",
-      "discriminator": [
-        109,
-        81,
-        183,
-        76,
-        142,
-        83,
-        154,
-        11
-      ],
-      "accounts": [
-        {
-          "name": "creator",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "gate",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  110,
-                  116,
-                  114,
-                  121,
-                  112,
-                  111,
-                  105,
-                  110,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "event"
-              },
-              {
-                "kind": "arg",
-                "path": "entrypoint_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "event",
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "entrypoint_id",
-          "type": "string"
-        },
-        {
-          "name": "authority",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
-      "name": "check_in",
-      "discriminator": [
-        209,
-        253,
-        4,
-        217,
-        250,
-        241,
-        207,
-        50
-      ],
-      "accounts": [
-        {
-          "name": "event",
-          "writable": true
-        },
-        {
-          "name": "gate",
-          "docs": [
-            "gate PDA & auth"
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  110,
-                  116,
-                  114,
-                  121,
-                  112,
-                  111,
-                  105,
-                  110,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "event"
-              },
-              {
-                "kind": "account",
-                "path": "gate.entrypoint_id",
-                "account": "GateAuthority"
-              }
-            ]
-          }
-        },
-        {
-          "name": "gate_agent",
-          "docs": [
-            "<- payer must be mutable!"
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "nft_mint",
-          "writable": true
-        },
-        {
-          "name": "nft_account",
-          "writable": true
-        },
-        {
-          "name": "ticket",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  105,
-                  99,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "event"
-              },
-              {
-                "kind": "account",
-                "path": "nft_mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "checkin",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  101,
-                  99,
-                  107,
-                  105,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "ticket"
-              },
-              {
-                "kind": "account",
-                "path": "clock.unix_timestamp"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "clock",
-          "address": "SysvarC1ock11111111111111111111111111111111"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": []
-    },
     {
       "name": "init_event",
       "discriminator": [
@@ -291,13 +85,16 @@
       "accounts": [
         {
           "name": "payer",
+          "docs": [
+            "Payer who signs & pays fees"
+          ],
           "writable": true,
           "signer": true
         },
         {
           "name": "event",
           "docs": [
-            "load the event PDA to check capacity and to use as freeze authority"
+            "The Event PDA, with seeds `[b\"event\", name, date]`"
           ],
           "writable": true,
           "pda": {
@@ -327,11 +124,17 @@
         },
         {
           "name": "nft_mint",
+          "docs": [
+            "NFT mint (fresh); authority and freeze_authority both set to `payer`"
+          ],
           "writable": true,
           "signer": true
         },
         {
           "name": "nft_account",
+          "docs": [
+            "Buyer’s ATA for this mint"
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -430,6 +233,9 @@
         },
         {
           "name": "ticket",
+          "docs": [
+            "Ticket PDA to record the sale"
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -457,17 +263,20 @@
         },
         {
           "name": "token_program",
+          "docs": [
+            "SPL Token program"
+          ],
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
           "name": "associated_token_program",
+          "docs": [
+            "SPL Associated Token program"
+          ],
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
           "name": "token_metadata_program",
-          "docs": [
-            "Metaplex Token Metadata program"
-          ],
           "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
         },
         {
@@ -497,19 +306,6 @@
   ],
   "accounts": [
     {
-      "name": "CheckInData",
-      "discriminator": [
-        188,
-        57,
-        165,
-        248,
-        8,
-        114,
-        17,
-        36
-      ]
-    },
-    {
       "name": "Event",
       "discriminator": [
         125,
@@ -520,19 +316,6 @@
         115,
         152,
         233
-      ]
-    },
-    {
-      "name": "GateAuthority",
-      "discriminator": [
-        136,
-        181,
-        249,
-        63,
-        204,
-        74,
-        27,
-        108
       ]
     },
     {
@@ -568,30 +351,6 @@
   ],
   "types": [
     {
-      "name": "CheckInData",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "ticket",
-            "type": "pubkey"
-          },
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
       "name": "Event",
       "type": {
         "kind": "struct",
@@ -619,30 +378,6 @@
           {
             "name": "issued_nfts",
             "type": "u32"
-          }
-        ]
-      }
-    },
-    {
-      "name": "GateAuthority",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "event",
-            "type": "pubkey"
-          },
-          {
-            "name": "entrypoint_id",
-            "type": "string"
-          },
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }

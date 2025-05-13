@@ -40,9 +40,11 @@ pub mod tickmyshow {
     ) -> Result<()> {
         let event_ai = ctx.accounts.event.to_account_info();
         let event    = &mut ctx.accounts.event;
-    
+
+        // 1) Capacity guard
         require!(event.issued_nfts < event.capacity, ErrorCode::SoldOut);
-    
+
+        // 2) Mint 1 NFT to buyer’s ATA
         mint_to(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -54,8 +56,9 @@ pub mod tickmyshow {
             ),
             1,
         )?;
-    
-        let metadata_data = MetaplexDataV2 {
+
+        // 3) Create metadata & master edition
+        let data = MetaplexDataV2 {
             name:                    title.clone(),
             symbol:                  symbol.clone(),
             uri:                     uri.clone(),
@@ -77,12 +80,11 @@ pub mod tickmyshow {
                     rent:             ctx.accounts.rent.to_account_info(),
                 },
             ),
-            metadata_data,
+            data,
             true,
             false,
             None,
         )?;
-    
         create_master_edition_v3(
             CpiContext::new(
                 ctx.accounts.token_metadata_program.to_account_info(),
@@ -100,11 +102,12 @@ pub mod tickmyshow {
             ),
             Some(0),
         )?;
-    
+
+        // 4) Transfer freeze authority to event PDA
         set_authority(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
-                SetAuthority {
+                anchor_spl::token::SetAuthority {
                     current_authority: ctx.accounts.payer.to_account_info(),
                     account_or_mint:   ctx.accounts.nft_mint.to_account_info(),
                 },
@@ -112,7 +115,8 @@ pub mod tickmyshow {
             AuthorityType::FreezeAccount,
             Some(event.key()),
         )?;
-    
+
+        // 5) Freeze buyer’s ATA under event PDA (soulbind)
         let seeds = &[
             b"event".as_ref(),
             event.name.as_bytes(),
@@ -130,7 +134,8 @@ pub mod tickmyshow {
                 &[seeds],
             ),
         )?;
-    
+
+        // 6) Record ticket
         let ticket = &mut ctx.accounts.ticket;
         ticket.event       = event.key();
         ticket.owner       = ctx.accounts.payer.key();
@@ -138,10 +143,11 @@ pub mod tickmyshow {
         ticket.nft_account = ctx.accounts.nft_account.key();
         ticket.checked_in  = false;
         ticket.bump        = ctx.bumps.ticket;
-    
+
         event.issued_nfts += 1;
         Ok(())
     }
+}
     
     pub fn assign_entrypoint(
         ctx: Context<AssignEntrypoint>,
@@ -200,7 +206,7 @@ pub mod tickmyshow {
         ctx.accounts.ticket.checked_in = true;
         Ok(())
     }
-}
+
 
 // ───── State ─
 
@@ -271,15 +277,11 @@ pub struct MintNftTicket<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    /// Event PDA (must match seeds `[b"event", name, date]`)
-    #[account(
-        mut,
-        seeds = [b"event", event.name.as_bytes(), &event.date.to_le_bytes()],
-        bump = event.bump
-    )]
+    /// The Event PDA, with seeds `[b"event", name, date]`
+    #[account(mut, seeds = [b"event", event.name.as_bytes(), &event.date.to_le_bytes()], bump = event.bump)]
     pub event: Account<'info, Event>,
 
-    /// NFT mint account (fresh new mint)
+    /// NFT mint (fresh); authority and freeze_authority both set to `payer`
     #[account(
         init,
         payer = payer,
@@ -289,43 +291,34 @@ pub struct MintNftTicket<'info> {
     )]
     pub nft_mint: Box<Account<'info, Mint>>,
 
-    /// Buyer’s associated token account for this mint
-    #[account(
-        init,
-        payer = payer,
-        associated_token::mint = nft_mint,
-        associated_token::authority = payer
-    )]
+    /// Buyer’s ATA for this mint
+    #[account(init, payer = payer, associated_token::mint = nft_mint, associated_token::authority = payer)]
     pub nft_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: Metaplex Metadata PDA (will be created via CPI; no further validation needed)
+    /// CHECK: Metaplex metadata account (created via CPI)
     #[account(mut)]
     pub metadata: UncheckedAccount<'info>,
 
-    /// CHECK: Metaplex Master Edition PDA (will be created via CPI; no further validation needed)
+    /// CHECK: Metaplex master edition account (created via CPI)
     #[account(mut)]
     pub master_edition: UncheckedAccount<'info>,
 
-    #[account(
-        init,
-        payer = payer,
-        space = 8 + std::mem::size_of::<Ticket>(),
-        seeds = [b"ticket", event.key().as_ref(), nft_mint.key().as_ref()],
-        bump
-    )]
+    /// Ticket PDA to record the sale
+    #[account(init, payer = payer, space = 8 + std::mem::size_of::<Ticket>(), seeds = [b"ticket", event.key().as_ref(), nft_mint.key().as_ref()], bump)]
     pub ticket: Account<'info, Ticket>,
 
+    /// SPL Token program
     pub token_program: Program<'info, Token>,
+    /// SPL Associated Token program
     pub associated_token_program: Program<'info, AssociatedToken>,
 
-    /// CHECK: Metaplex Token Metadata program (we only call CPI; no deserialization)
+    /// CHECK: Metaplex Token Metadata program (CPI only)
     #[account(address = mpl_token_metadata::ID)]
-    pub token_metadata_program: AccountInfo<'info>,
+    pub token_metadata_program: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
+    pub rent:            Sysvar<'info, Rent>,
 }
-
 
 
 
