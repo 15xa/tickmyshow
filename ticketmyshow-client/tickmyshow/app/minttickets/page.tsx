@@ -1,230 +1,310 @@
 "use client";
+
 import React, { useState, useEffect } from "react";
-import { PublicKey, Keypair, SystemProgram, SYSVAR_RENT_PUBKEY, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { WalletModalProvider, WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { PublicKey, SystemProgram, Keypair, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
+import { useAnchorProgram } from "../anchor/setup"; 
 import { WalletButtonClient } from "../components/walletbutton";
-import { useAnchorProgram, Tickmyshow, PROGRAM_ID } from "../anchor/setup";
-import { Program } from "@coral-xyz/anchor";
+import { BN } from "@coral-xyz/anchor";
 
-const MPL_TOKEN_METADATA_PROGRAM_ID = new PublicKey(
-  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-);
+type TickmyshowProgram = any; // Replace with your actual program type e.g. Program<Tickmyshow>
 
-type FetchProps = {
-  program: Program<Tickmyshow> | null;
-  eventAccount: any;
-  eventPda: PublicKey | null;
-  setEventAccount: (evt: any) => void;
-  setEventPda: (pda: PublicKey | null) => void;
-};
+interface EventAccountData {
+  creator: PublicKey;
+  name: string;
+  date: BN;
+  bump: number;
+  capacity: number;
+  issuedNfts: number;
+}
 
-const FetchPdakey = ({ program, eventAccount, eventPda, setEventAccount, setEventPda }: FetchProps) => {
-  const [input, setInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+const MPL_TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
-  const fetchEvent = async (): Promise<void> => {
-    if (!program) {
-      setError("Program not ready. Please connect your wallet.");
-      return;
-    }
-    if (!input.trim()) {
-      setError("Please enter an Event PDA.");
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      const pubkey = new PublicKey(input);
-      const account = await (program as any).account.event.fetch(pubkey);
-      setEventPda(pubkey);
-      setEventAccount(account);
-    } catch (e) {
-      setError("Invalid PDA or event not found.");
-      setEventAccount(null);
-      setEventPda(null);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-4 p-4 border border-gray-700 rounded-lg bg-gray-800 shadow-xl">
-      <div><WalletButtonClient /></div>
-      <h2 className="text-xl font-semibold text-white">Find Event</h2>
-      <input
-        className="w-full p-3 border border-gray-600 rounded-md bg-gray-700 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-        placeholder="Enter Event PDA"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        disabled={isLoading}
-      />
-      <button
-        onClick={fetchEvent}
-        className={`w-full px-4 py-3 font-medium rounded-md transition-all duration-300 ease-in-out
-                    ${isLoading ? 'bg-gray-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50'}`}
-        disabled={isLoading}
-      >
-        {isLoading ? "Loading..." : "Load Event Details"}
-      </button>
-      {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
-      {eventAccount && eventPda && (
-        <div className="mt-4 p-4 bg-gray-700 text-white rounded-md shadow">
-          <h3 className="text-lg font-semibold mb-2">Event Details:</h3>
-          <p><strong>Name:</strong> {eventAccount.name}</p>
-          <p><strong>Date:</strong> {new Date(eventAccount.date.toNumber() * 1000).toLocaleString()}</p>
-          <p><strong>Issued / Capacity:</strong> {eventAccount.issued?.toString() || 'N/A'} / {eventAccount.capacity?.toString() || 'N/A'}</p>
-        </div>
-      )}
-    </div>
+const getTicketPDA = (
+  eventKey: PublicKey,
+  nftMintKey: PublicKey,
+  programId: PublicKey
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("ticket"),
+      eventKey.toBuffer(),
+      nftMintKey.toBuffer(),
+    ],
+    programId
   );
 };
 
-export default function MintTicketsPage() {
-  const { program, provider, wallet } = useAnchorProgram();
-  const connection = provider?.connection;
-  const publicKey = wallet.publicKey;
-  const signTransaction = wallet.signTransaction;
-  const signAllTransactions = wallet.signAllTransactions;
-  const connected = wallet.connected;
+// Helper function to get Metaplex Metadata PDA
+const getMetadataPDA = (nftMintKey: PublicKey): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("metadata"),
+      MPL_TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+      nftMintKey.toBuffer(),
+    ],
+    MPL_TOKEN_METADATA_PROGRAM_ID
+  );
+};
 
-  const [eventAccount, setEventAccount] = useState<any>(null);
-  const [eventPda, setEventPda] = useState<PublicKey | null>(null);
-  const [mintedNftAddress, setMintedNftAddress] = useState<string | null>(null);
-  const [isMinting, setIsMinting] = useState(false);
-  const [mintError, setMintError] = useState<string | null>(null);
-  const [mintSuccessMessage, setMintSuccessMessage] = useState<string | null>(null);
+// Helper function to get Metaplex Master Edition PDA
+const getMasterEditionPDA = (nftMintKey: PublicKey): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("metadata"),
+      MPL_TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+      nftMintKey.toBuffer(),
+      Buffer.from("edition"),
+    ],
+    MPL_TOKEN_METADATA_PROGRAM_ID
+  );
+};
+
+
+export default function MintTicketPage() {
+  const { program, wallet } = useAnchorProgram(); 
+  const publicKey = wallet?.publicKey;
+
+  const [eventPdaInput, setEventPdaInput] = useState<string>("");
+  const [eventPublicKey, setEventPublicKey] = useState<PublicKey | null>(null);
+  const [eventData, setEventData] = useState<EventAccountData | null>(null);
+  const [nftUri, setNftUri] = useState<string>("");
+  const [nftTitle, setNftTitle] = useState<string>("");
+  const [nftSymbol, setNftSymbol] = useState<string>("");
+  
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string>("");
 
   useEffect(() => {
-    setMintError(null);
-    setMintSuccessMessage(null);
-    setMintedNftAddress(null);
-  }, [eventPda]);
+    if (eventData) {
+      setNftTitle(`${eventData.name} Ticket`);
+      setNftSymbol(`EVT${eventData.name.slice(0,3).toUpperCase()}`);
+      // Suggest a URI or leave it for user input
+      setNftUri(`https://api.example.com/nft/metadata/event/${eventPublicKey?.toBase58()}/ticket`);
+    }
+  }, [eventData, eventPublicKey]);
 
-  const handleMint = async (): Promise<void> => {
-    if (!program || !publicKey || !signTransaction || !connection) {
-      setMintError("Wallet not connected or program not initialized.");
+  const handleFetchEvent = async () => {
+    if (!program) {
+      setMessage("Program not loaded. Connect wallet.");
       return;
     }
-    if (!eventPda || !eventAccount) {
-      setMintError("Please load an event first.");
+    if (!eventPdaInput) {
+      setMessage("Please enter an Event PDA.");
       return;
     }
-
-    setIsMinting(true);
-    setMintError(null);
-    setMintSuccessMessage(null);
+    setLoading(true);
+    setMessage("");
+    setEventData(null);
+    setEventPublicKey(null);
 
     try {
-      const lamports = await connection.getBalance(publicKey);
-      const solBalance = lamports / LAMPORTS_PER_SOL;
-      const minSolBalance = 0.03;
-
-      if (solBalance < minSolBalance) {
-        setMintError(`Insufficient SOL. Need ~${minSolBalance} SOL. Your balance: ${solBalance.toFixed(4)} SOL.`);
-        setIsMinting(false);
-        return;
-      }
-
-      const nftMintKeypair = Keypair.generate();
-      const userNftAta = getAssociatedTokenAddressSync(nftMintKeypair.publicKey, publicKey);
-
-      const [metadataPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("metadata"), MPL_TOKEN_METADATA_PROGRAM_ID.toBuffer(), nftMintKeypair.publicKey.toBuffer()],
-        MPL_TOKEN_METADATA_PROGRAM_ID
-      );
-      const [masterEditionPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("metadata"), MPL_TOKEN_METADATA_PROGRAM_ID.toBuffer(), nftMintKeypair.publicKey.toBuffer(), Buffer.from("edition")],
-        MPL_TOKEN_METADATA_PROGRAM_ID
-      );
-      const [ticketPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("ticket"), eventPda.toBuffer(), nftMintKeypair.publicKey.toBuffer()],
-        PROGRAM_ID
-      );
-
-      const existingTicket = await (program as any).account.ticket.fetchNullable(ticketPda);
-      if (existingTicket && existingTicket.nftMint) {
-        setMintError("You already have an NFT ticket for this event.");
-        setMintedNftAddress(existingTicket.nftMint.toBase58());
-        setIsMinting(false);
-        return;
-      }
-
-      const txSig = await (program.methods as any)
-        .mintNftTicket("uri", "title", "symbol")
-        .accounts({
-          event: eventPda,
-          ticket: ticketPda,
-          nftMint: nftMintKeypair.publicKey,
-          nftAccount: userNftAta,
-          metadata: metadataPda,
-          masterEdition: masterEditionPda,
-          payer: publicKey,
-          systemProgram: SystemProgram.programId,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          tokenMetadataProgram: MPL_TOKEN_METADATA_PROGRAM_ID,
-          rent: SYSVAR_RENT_PUBKEY,
-        })
-        .signers([nftMintKeypair])
-        .rpc();
-
-      setMintSuccessMessage("NFT Ticket minted successfully!");
-      setMintedNftAddress(nftMintKeypair.publicKey.toBase58());
-      const updatedEvt = await (program as any).account.event.fetch(eventPda);
-      setEventAccount(updatedEvt);
+      const pda = new PublicKey(eventPdaInput);
+      // Adjust based on how your IDL types are structured (e.g., program.account.event.fetch)
+      const fetchedEvent = await (program as TickmyshowProgram).account.event.fetch(pda);
+      
+      // The fetchedEvent might have fields like issued_nfts. Map to camelCase if needed by EventAccountData
+      setEventData({
+        creator: fetchedEvent.creator,
+        name: fetchedEvent.name,
+        date: fetchedEvent.date, // This will be a BN
+        bump: fetchedEvent.bump,
+        capacity: fetchedEvent.capacity,
+        issuedNfts: fetchedEvent.issuedNfts // Use directly from fetched data
+      });
+      setEventPublicKey(pda);
+      setMessage(`Event "${fetchedEvent.name}" loaded successfully.`);
     } catch (err: any) {
-      setMintError(`NFT Minting failed: ${err.message || err.toString()}`);
+      console.error("Error fetching event:", err);
+      let msg = err.message || "Failed to fetch event. Make sure the PDA is correct and the event exists.";
+      if (err.logs) msg += "\nProgram Logs:\n" + err.logs.join("\n");
+      setMessage("❌ Error: " + msg);
+      setEventData(null);
+      setEventPublicKey(null);
     } finally {
-      setIsMinting(false);
+      setLoading(false);
     }
   };
 
+  const handleMintTicket = async () => {
+    if (!program || !publicKey || !eventPublicKey || !eventData) {
+      setMessage("Wallet not connected, or event not loaded.");
+      return;
+    }
+
+    if (eventData.issuedNfts >= eventData.capacity) {
+      setMessage("❌ Error: Event is sold out!");
+      return;
+    }
+
+    if (!nftUri || !nftTitle || !nftSymbol) {
+      setMessage("❌ Error: Please fill in NFT URI, Title, and Symbol.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("Minting NFT ticket...");
+
+    try {
+      const nftMintKeypair = Keypair.generate();
+      const nftMintPublicKey = nftMintKeypair.publicKey;
+
+      const buyerAta = await getAssociatedTokenAddress(nftMintPublicKey, publicKey);
+      const [metadataPDA] = getMetadataPDA(nftMintPublicKey);
+      const [masterEditionPDA] = getMasterEditionPDA(nftMintPublicKey);
+      const [ticketPDA] = getTicketPDA(eventPublicKey, nftMintPublicKey, program.programId);
+
+      const tx = await (program as TickmyshowProgram).methods
+        .mintNftTicket(nftUri, nftTitle, nftSymbol)
+        .accounts({
+          payer: publicKey,
+          event: eventPublicKey,
+          nftMint: nftMintPublicKey,
+          nftAccount: buyerAta,
+          metadata: metadataPDA,
+          masterEdition: masterEditionPDA,
+          ticket: ticketPDA,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenMetadataProgram: MPL_TOKEN_METADATA_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .signers([nftMintKeypair]) // nft_mint is an init account, so its keypair must sign
+        .rpc();
+
+      setMessage(`✅ NFT Ticket minted successfully!\nTx: ${tx}\nNFT Mint: ${nftMintPublicKey.toBase58()}\nTicket PDA: ${ticketPDA.toBase58()}`);
+      
+      // Optionally, re-fetch event data to update issuedNfts count
+      handleFetchEvent(); 
+
+    } catch (err: any) {
+      console.error("Error minting NFT ticket:", err);
+      let msg = err.message || "Unknown error during minting.";
+      if (err.logs) msg += "\nProgram Logs:\n" + err.logs.join("\n");
+      setMessage("❌ Error: " + msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canMint = eventData && eventData.issuedNfts < eventData.capacity;
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-6 lg:p-8 flex flex-col items-center">
-      <div className="w-full max-w-2xl space-y-8">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
-            Mint Event NFT Ticket
-          </h1>
-          <WalletMultiButton />
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold mb-6 text-center">Mint NFT Ticket</h1>
+
+      {!wallet || !wallet.connected ? (
+        <div className="text-center py-10">
+          <WalletButtonClient/>
+          <p className="text-xl text-gray-700">Please connect your wallet to mint a ticket.</p>
         </div>
-        {!connected ? (
-          <div className="p-6 bg-gray-800 rounded-lg shadow-xl text-center">
-            <p className="text-lg text-yellow-400">Please connect your wallet to mint tickets.</p>
+      ) : (
+        <>
+          <div className="mb-8 p-6 bg-white shadow-lg rounded-lg">
+            <h2 className="text-2xl font-semibold mb-4">1. Load Event</h2>
+            <div className="mb-4">
+              <label htmlFor="eventPda" className="block text-sm font-medium text-gray-700 mb-1">
+                Event PDA:
+              </label>
+              <input
+                type="text"
+                id="eventPda"
+                value={eventPdaInput}
+                onChange={(e) => setEventPdaInput(e.target.value)}
+                placeholder="Enter Event PDA (e.g., Bx...)"
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                disabled={loading}
+              />
+            </div>
+            <button
+              onClick={handleFetchEvent}
+              disabled={loading || !eventPdaInput}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md focus:outline-none focus:shadow-outline disabled:opacity-50"
+            >
+              {loading && !eventData ? "Loading Event..." : "Load Event Details"}
+            </button>
           </div>
-        ) : (
-          <>
-            <FetchPdakey
-              program={program}
-              eventAccount={eventAccount}
-              eventPda={eventPda}
-              setEventAccount={setEventAccount}
-              setEventPda={setEventPda}
-            />
-            {eventAccount && eventPda && (
-              <div className="mt-6 p-4 bg-gray-800 rounded-lg shadow-xl text-center space-y-4">
-                <button
-                  onClick={handleMint}
-                  className={`px-6 py-3 font-semibold rounded-lg transition-all
-                    ${isMinting ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white'}`}
-                  disabled={isMinting}
-                >
-                  {isMinting ? "Minting..." : "Mint My Ticket"}
-                </button>
-                {mintError && <p className="text-red-400 text-sm">{mintError}</p>}
-                {mintSuccessMessage && mintedNftAddress && (
-                  <div className="text-green-400">
-                    <p>{mintSuccessMessage}</p>
-                    <p className="break-all">NFT Mint Address: {mintedNftAddress}</p>
-                  </div>
-                )}
+
+          {eventData && eventPublicKey && (
+            <div className="mb-8 p-6 bg-white shadow-lg rounded-lg">
+              <h2 className="text-2xl font-semibold mb-4">Event Details</h2>
+              <p><strong>Name:</strong> {eventData.name}</p>
+              <p><strong>Date:</strong> {new Date(eventData.date.toNumber() * 1000).toLocaleString()}</p> {/* Assuming date is Unix timestamp in seconds */}
+              <p><strong>Capacity:</strong> {eventData.capacity}</p>
+              <p><strong>Tickets Issued:</strong> {eventData.issuedNfts}</p>
+              <p><strong>Creator:</strong> {eventData.creator.toBase58()}</p>
+              <p><strong>Event PDA:</strong> {eventPublicKey.toBase58()}</p>
+              {eventData.issuedNfts >= eventData.capacity && (
+                <p className="text-red-500 font-bold mt-2">This event is SOLD OUT!</p>
+              )}
+            </div>
+          )}
+
+          {eventData && canMint && (
+            <div className="p-6 bg-white shadow-lg rounded-lg">
+              <h2 className="text-2xl font-semibold mb-4">2. Configure NFT Ticket</h2>
+              <div className="mb-4">
+                <label htmlFor="nftTitle" className="block text-sm font-medium text-gray-700 mb-1">
+                  NFT Title:
+                </label>
+                <input
+                  type="text"
+                  id="nftTitle"
+                  value={nftTitle}
+                  onChange={(e) => setNftTitle(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  disabled={loading}
+                />
               </div>
-            )}
-          </>
-        )}
-      </div>
+              <div className="mb-4">
+                <label htmlFor="nftSymbol" className="block text-sm font-medium text-gray-700 mb-1">
+                  NFT Symbol:
+                </label>
+                <input
+                  type="text"
+                  id="nftSymbol"
+                  value={nftSymbol}
+                  onChange={(e) => setNftSymbol(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  disabled={loading}
+                />
+              </div>
+              <div className="mb-4">
+                <label htmlFor="nftUri" className="block text-sm font-medium text-gray-700 mb-1">
+                  NFT Metadata URI:
+                </label>
+                <input
+                  type="text"
+                  id="nftUri"
+                  value={nftUri}
+                  onChange={(e) => setNftUri(e.target.value)}
+                  placeholder="https://example.com/metadata.json"
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  disabled={loading}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  This URI should point to a JSON file following Metaplex NFT metadata standards.
+                  For production, host this on Arweave/IPFS.
+                </p>
+              </div>
+              <button
+                onClick={handleMintTicket}
+                disabled={loading || !canMint || !nftUri || !nftTitle || !nftSymbol}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md focus:outline-none focus:shadow-outline disabled:opacity-50"
+              >
+                {loading ? "Minting..." : "Mint Ticket"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {message && (
+        <div className={`mt-6 p-4 rounded-md ${message.startsWith("❌") ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
+          <p className="whitespace-pre-wrap">{message}</p>
+        </div>
+      )}
     </div>
   );
 }

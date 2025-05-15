@@ -1,16 +1,31 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    token::{
-        mint_to, burn, freeze_account, thaw_account, set_authority,
-        Mint, Token, TokenAccount, MintTo, Burn, FreezeAccount, ThawAccount, SetAuthority,
-    },
-    metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3,
-               create_master_edition_v3,    CreateMasterEditionV3},
+use anchor_lang::solana_program::{
+    sysvar::instructions::ID as SYSVAR_INSTRUCTIONS_ID,
+    program::invoke_signed,
+    system_program,
 };
-use mpl_token_metadata::types::DataV2 as MetaplexDataV2;
-use anchor_spl::token::spl_token::instruction::AuthorityType;
+use anchor_spl::{
+    token::{self, Mint, TokenAccount, MintTo, Burn, ThawAccount, Token},
+    associated_token::AssociatedToken,
+    metadata::{
+        create_metadata_accounts_v3,
+        create_master_edition_v3,
+        Metadata,
+        CreateMetadataAccountsV3,
+        CreateMasterEditionV3,
+    },
+};
+
+use mpl_token_metadata::{
+    instructions::{LockBuilder},
+    types::{DataV2},
+    // Removed unused import
+};
+
+
 declare_id!("5FFwn1xD4ae3kttPDNoHmnW2x2tfekLQXUbRiaj6mBeG");
+
+const MAX_NAME_LEN: usize = 32;
 
 #[program]
 pub mod tickmyshow {
@@ -38,14 +53,11 @@ pub mod tickmyshow {
         title: String,
         symbol: String,
     ) -> Result<()> {
-        let event_ai = ctx.accounts.event.to_account_info();
-        let event    = &mut ctx.accounts.event;
-
-        // 1) Capacity guard
+        let event = &mut ctx.accounts.event;
         require!(event.issued_nfts < event.capacity, ErrorCode::SoldOut);
 
-        // 2) Mint 1 NFT to buyer’s ATA
-        mint_to(
+        // 1) Mint
+        token::mint_to(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 MintTo {
@@ -57,15 +69,15 @@ pub mod tickmyshow {
             1,
         )?;
 
-        // 3) Create metadata & master edition
-        let data = MetaplexDataV2 {
-            name:                    title.clone(),
-            symbol:                  symbol.clone(),
-            uri:                     uri.clone(),
+        // 2) Metadata
+        let data = DataV2 {
+            name: title.clone(),
+            symbol: symbol.clone(),
+            uri: uri.clone(),
             seller_fee_basis_points: 0,
-            creators:                None,
-            collection:              None,
-            uses:                    None,
+            creators: None,
+            collection: None,
+            uses: None,
         };
         create_metadata_accounts_v3(
             CpiContext::new(
@@ -81,61 +93,61 @@ pub mod tickmyshow {
                 },
             ),
             data,
-            true,
-            false,
-            None,
+            true, // is_mutable
+            false, // collection_details_is_mutable
+            None, // collection_details
         )?;
+
+        // 3) Master Edition
         create_master_edition_v3(
             CpiContext::new(
                 ctx.accounts.token_metadata_program.to_account_info(),
                 CreateMasterEditionV3 {
-                    edition:           ctx.accounts.master_edition.to_account_info(),
-                    mint:              ctx.accounts.nft_mint.to_account_info(),
-                    update_authority:  ctx.accounts.payer.to_account_info(),
-                    mint_authority:    ctx.accounts.payer.to_account_info(),
-                    payer:             ctx.accounts.payer.to_account_info(),
-                    metadata:          ctx.accounts.metadata.to_account_info(),
-                    token_program:     ctx.accounts.token_program.to_account_info(),
-                    system_program:    ctx.accounts.system_program.to_account_info(),
-                    rent:              ctx.accounts.rent.to_account_info(),
+                    edition:          ctx.accounts.master_edition.to_account_info(),
+                    mint:             ctx.accounts.nft_mint.to_account_info(),
+                    update_authority: ctx.accounts.payer.to_account_info(),
+                    mint_authority:   ctx.accounts.payer.to_account_info(),
+                    payer:            ctx.accounts.payer.to_account_info(),
+                    metadata:         ctx.accounts.metadata.to_account_info(),
+                    token_program:    ctx.accounts.token_program.to_account_info(),
+                    system_program:   ctx.accounts.system_program.to_account_info(),
+                    rent:             ctx.accounts.rent.to_account_info(),
                 },
             ),
             Some(0),
         )?;
 
-        // 4) Transfer freeze authority to event PDA
-        set_authority(
-            CpiContext::new(
+        // 4) Lock - Using the LockBuilder with the current API
+        // Fix the temporary value dropped while borrowed error by chaining all calls
+        let lock_ix = LockBuilder::new()
+            .payer(ctx.accounts.payer.key())
+            .authority(ctx.accounts.payer.key())
+            .token(ctx.accounts.nft_account.key())
+            .mint(ctx.accounts.nft_mint.key())
+            .metadata(ctx.accounts.metadata.key())
+            .edition(Some(ctx.accounts.master_edition.key()))
+            .spl_token_program(Some(token::ID))
+            .system_program(system_program::ID)
+            .sysvar_instructions(SYSVAR_INSTRUCTIONS_ID)
+            .instruction();
+
+        // Invoke the instruction
+        invoke_signed(
+            &lock_ix,
+            &[
+                ctx.accounts.payer.to_account_info(),
+                ctx.accounts.nft_account.to_account_info(),
+                ctx.accounts.nft_mint.to_account_info(),
+                ctx.accounts.metadata.to_account_info(),
+                ctx.accounts.master_edition.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
                 ctx.accounts.token_program.to_account_info(),
-                anchor_spl::token::SetAuthority {
-                    current_authority: ctx.accounts.payer.to_account_info(),
-                    account_or_mint:   ctx.accounts.nft_mint.to_account_info(),
-                },
-            ),
-            AuthorityType::FreezeAccount,
-            Some(event.key()),
+                ctx.accounts.sysvar_instructions.to_account_info(),
+            ],
+            &[],
         )?;
 
-        // 5) Freeze buyer’s ATA under event PDA (soulbind)
-        let seeds = &[
-            b"event".as_ref(),
-            event.name.as_bytes(),
-            &event.date.to_le_bytes(),
-            &[event.bump],
-        ];
-        freeze_account(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                FreezeAccount {
-                    account:   ctx.accounts.nft_account.to_account_info(),
-                    mint:      ctx.accounts.nft_mint.to_account_info(),
-                    authority: event_ai.clone(),
-                },
-                &[seeds],
-            ),
-        )?;
-
-        // 6) Record ticket
+        // 5) Record
         let ticket = &mut ctx.accounts.ticket;
         ticket.event       = event.key();
         ticket.owner       = ctx.accounts.payer.key();
@@ -143,12 +155,11 @@ pub mod tickmyshow {
         ticket.nft_account = ctx.accounts.nft_account.key();
         ticket.checked_in  = false;
         ticket.bump        = ctx.bumps.ticket;
-
         event.issued_nfts += 1;
+
         Ok(())
     }
-}
-    
+
     pub fn assign_entrypoint(
         ctx: Context<AssignEntrypoint>,
         entrypoint_id: String,
@@ -170,9 +181,10 @@ pub mod tickmyshow {
             &event.date.to_le_bytes(),
             &[event.bump],
         ];
+        let signer_seeds = &[&seeds[..]];
 
-        
-        thaw_account(
+        // Use the imported thaw_account function from anchor_spl::token
+        token::thaw_account(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 ThawAccount {
@@ -180,12 +192,12 @@ pub mod tickmyshow {
                     mint:      ctx.accounts.nft_mint.to_account_info(),
                     authority: ctx.accounts.event.to_account_info(),
                 },
-                &[seeds],
+                signer_seeds,
             ),
         )?;
 
-        
-        burn(
+        // Use the imported burn function from anchor_spl::token
+        token::burn(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 Burn {
@@ -193,7 +205,7 @@ pub mod tickmyshow {
                     from:      ctx.accounts.nft_account.to_account_info(),
                     authority: ctx.accounts.event.to_account_info(),
                 },
-                &[seeds],
+                signer_seeds,
             ),
             1,
         )?;
@@ -206,7 +218,7 @@ pub mod tickmyshow {
         ctx.accounts.ticket.checked_in = true;
         Ok(())
     }
-
+}
 
 // ───── State ─
 
@@ -273,54 +285,43 @@ pub struct InitEvent<'info> {
 #[derive(Accounts)]
 #[instruction(uri: String, title: String, symbol: String)]
 pub struct MintNftTicket<'info> {
-    /// Payer who signs & pays fees
-    #[account(mut)]
-    pub payer: Signer<'info>,
+    #[account(mut)] pub payer: Signer<'info>,
 
-    /// The Event PDA, with seeds `[b"event", name, date]`
-    #[account(mut, seeds = [b"event", event.name.as_bytes(), &event.date.to_le_bytes()], bump = event.bump)]
+    #[account(mut, seeds = [b"event", event.name.as_bytes(), &event.date.to_le_bytes()], bump)]
     pub event: Account<'info, Event>,
 
-    /// NFT mint (fresh); authority and freeze_authority both set to `payer`
-    #[account(
-        init,
-        payer = payer,
-        mint::decimals = 0,
-        mint::authority = payer,
-        mint::freeze_authority = payer
-    )]
+    #[account(init, payer = payer, mint::decimals = 0, mint::authority = payer, mint::freeze_authority = payer)]
     pub nft_mint: Box<Account<'info, Mint>>,
 
-    /// Buyer’s ATA for this mint
     #[account(init, payer = payer, associated_token::mint = nft_mint, associated_token::authority = payer)]
     pub nft_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: Metaplex metadata account (created via CPI)
-    #[account(mut)]
-    pub metadata: UncheckedAccount<'info>,
+    /// CHECK: This is the metadata account that will be created
+    #[account(mut)] pub metadata: UncheckedAccount<'info>,
+    
+    /// CHECK: This is the master edition account that will be created
+    #[account(mut)] pub master_edition: UncheckedAccount<'info>,
 
-    /// CHECK: Metaplex master edition account (created via CPI)
-    #[account(mut)]
-    pub master_edition: UncheckedAccount<'info>,
-
-    /// Ticket PDA to record the sale
-    #[account(init, payer = payer, space = 8 + std::mem::size_of::<Ticket>(), seeds = [b"ticket", event.key().as_ref(), nft_mint.key().as_ref()], bump)]
+    #[account(init, payer = payer,
+        space = 8 + 32 + 32 + 32 + 32 + 1 + 1,
+        seeds = [b"ticket", event.key().as_ref(), nft_mint.key().as_ref()],
+        bump)]
     pub ticket: Account<'info, Ticket>,
 
-    /// SPL Token program
     pub token_program: Program<'info, Token>,
-    /// SPL Associated Token program
     pub associated_token_program: Program<'info, AssociatedToken>,
 
-    /// CHECK: Metaplex Token Metadata program (CPI only)
-    #[account(address = mpl_token_metadata::ID)]
+    /// CHECK: This is the token metadata program
+    #[account(address = Metadata::id())]
     pub token_metadata_program: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
-    pub rent:            Sysvar<'info, Rent>,
+    pub rent: Sysvar<'info, Rent>,
+
+    /// CHECK: This is the instructions sysvar
+    #[account(address = SYSVAR_INSTRUCTIONS_ID)]
+    pub sysvar_instructions: UncheckedAccount<'info>,
 }
-
-
 
 #[derive(Accounts)]
 #[instruction(entrypoint_id: String)]
@@ -343,14 +344,12 @@ pub struct AssignEntrypoint<'info> {
 pub struct CheckIn<'info> {
     #[account(mut)] pub event: Account<'info, Event>,
 
-    /// gate PDA & auth
     #[account(
         seeds = [b"entrypoint", event.key().as_ref(), gate.entrypoint_id.as_bytes()],
         bump = gate.bump
     )]
     pub gate: Account<'info, GateAuthority>,
 
-    /// <- payer must be mutable!
     #[account(mut, address = gate.authority)]
     pub gate_agent: Signer<'info>,
 
