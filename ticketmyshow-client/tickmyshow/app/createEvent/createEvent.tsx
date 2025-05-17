@@ -6,6 +6,7 @@ import { BN } from "@coral-xyz/anchor";
 import CreatePopup from "./createPopu";
 
 export default function CreateEvent() {
+  const [createdEvent, setCreatedEvent] = useState("");
   const { program, wallet } = useAnchorProgram();
   const publicKey = wallet.publicKey;
   const [loading, setLoading] = useState(false);
@@ -30,6 +31,7 @@ export default function CreateEvent() {
 
       alert(`✅ Event created!\nTx: ${tx}\nPDA: ${eventPDA.toBase58()}`);
       setpda(eventPDA.toBase58());
+      setCreatedEvent(tx);
       
     } catch (err: any) {
       let msg = err.message || "Unknown error";
@@ -42,11 +44,11 @@ export default function CreateEvent() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      {wallet.connected ? (
+      {(wallet.connected && !createdEvent) ? (
         <CreatePopup onSubmit={handleCreate} loading={loading} />
       ) : (
         <div className="text-center py-10">
-          <p className="text-xl text-gray-700">Please connect your wallet to create an event.</p>
+          <p className="text-xl text-black-700">Please connect your wallet to create an event.</p>
         </div>
       )}
 

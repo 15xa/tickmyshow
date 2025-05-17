@@ -81,54 +81,7 @@ pub mod tickmyshow {
         Ok(())
     }
 
-    /// Thaw the frozen ATA, burn the NFT, and record a check‑in.
-    pub fn check_in(ctx: Context<CheckIn>) -> Result<()> {
-        let event = &ctx.accounts.event;
-        let seeds = &[
-            b"event".as_ref(),
-            event.name.as_bytes(),
-            &event.date.to_le_bytes(),
-            &[event.bump],
-        ];
-        let signer_seeds: &[&[&[u8]]] = &[&seeds[..]];
-
-        // 1) Thaw
-        token::thaw_account(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                ThawAccount {
-                    account:   ctx.accounts.nft_account.to_account_info(),
-                    mint:      ctx.accounts.nft_mint.to_account_info(),
-                    authority: ctx.accounts.event.to_account_info(),
-                },
-                signer_seeds,
-            ),
-        )?;
-
-        // 2) Burn the single token
-        token::burn(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Burn {
-                    mint:      ctx.accounts.nft_mint.to_account_info(),
-                    from:      ctx.accounts.nft_account.to_account_info(),
-                    authority: ctx.accounts.event.to_account_info(),
-                },
-                signer_seeds,
-            ),
-            1,
-        )?;
-
-        // 3) Log it
-        let log = &mut ctx.accounts.checkin;
-        log.ticket    = ctx.accounts.ticket.key();
-        log.owner     = ctx.accounts.ticket.owner;
-        log.timestamp = ctx.accounts.clock.unix_timestamp;
-        log.bump      = ctx.bumps.checkin;
-        ctx.accounts.ticket.checked_in = true;
-
-        Ok(())
-    }
+   
 }
 
 // ───── Account State ─────
@@ -153,22 +106,8 @@ pub struct Ticket {
     pub bump:        u8,
 }
 
-/// Used by `mint_and_freeze` to re‑assign freeze authority
-#[account]
-pub struct GateAuthority {
-    pub event:         Pubkey,
-    pub entrypoint_id: String,
-    pub authority:     Pubkey,
-    pub bump:          u8,
-}
 
-#[account]
-pub struct CheckInData {
-    pub ticket:    Pubkey,
-    pub owner:     Pubkey,
-    pub timestamp: i64,
-    pub bump:      u8,
-}
+
 
 #[account]
 pub struct WalletCounter {
@@ -220,31 +159,4 @@ pub struct MintAndFreeze<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program:       Program<'info, System>,
     pub rent:                 Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-pub struct CheckIn<'info> {
-    #[account(mut)] pub event:   Account<'info, Event>,
-    #[account(mut)] pub ticket:  Account<'info, Ticket>,
-    #[account(mut)] pub nft_mint:    Account<'info, Mint>,
-    #[account(mut)] pub nft_account: Account<'info, TokenAccount>,
-    #[account(
-        init, payer = gate_agent,
-        space = 8 + 32 + 32 + 8 + 1,
-        seeds = [b"checkin", ticket.key().as_ref(), &clock.unix_timestamp.to_le_bytes()],
-        bump
-    )]
-    pub checkin: Account<'info, CheckInData>,
-
-    #[account(mut, address = gate.authority)]
-    pub gate_agent: Signer<'info>,
-    #[account(
-        seeds = [b"entrypoint", event.key().as_ref(), gate.entrypoint_id.as_bytes()],
-        bump = gate.bump
-    )]
-    pub gate:    Account<'info, GateAuthority>,
-
-    pub token_program:  Program<'info, Token>,
-    pub clock:          Sysvar<'info, Clock>,
-    pub system_program: Program<'info, System>,
 }

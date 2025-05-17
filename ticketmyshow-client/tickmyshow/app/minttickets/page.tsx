@@ -79,7 +79,6 @@ export default function MintTicketPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string>("");
 
-  // Auto‐fill title/symbol once event is loaded
   useEffect(() => {
     if (eventData && eventPk) {
       setTitle(`${eventData.name} Ticket`);
@@ -144,7 +143,6 @@ export default function MintTicketPage() {
       );
       setMessage(`Mint+freeze successful: ${tx}`);
 
-      // refresh issued_nfts
       await loadEvent();
     } catch (err: any) {
       setMessage("❌ Error: " + (err.message || err.toString()));
