@@ -81,7 +81,8 @@ export default function CanvasTicket({ eventName, eventDate, mint }: Props) {
   };
 
   return (
-    <div className="flex flex-col items-center space-y-4">
+    <div className='flex items-center justify-center text-center'>
+    <div className="flex flex-col items-center space-y-4 bg-white p-4 w-fit rounded-xl">
       <canvas
         ref={canvasRef}
         width={ticketW}
@@ -94,6 +95,7 @@ export default function CanvasTicket({ eventName, eventDate, mint }: Props) {
       >
         Download PDF
       </button>
+    </div>
     </div>
   );
 }

@@ -50,10 +50,9 @@ export default function CreateEvent() {
 
       setTxSignature(signature);
       setEventPda(pda.toBase58());
-      alert(`✅ Event created!\nSignature: ${signature}\nPDA: ${pda.toBase58()}`);
     } catch (err: any) {
       const logs = err.logs ? err.logs.join("\n") : "";
-      alert(`❌ Error: ${err.message}\n${logs}`);
+      console.log(`❌ Error: ${err.message}\n${logs}`);
     } finally {
       setLoading(false);
     }
@@ -64,7 +63,7 @@ export default function CreateEvent() {
       {!txSignature ? (
         <CreatePopup onSubmit={handleCreate} loading={loading} />
       ) : (
-        <div className="flex flex-col items-center text-center py-10 gap-2 border border-2 border-green-400 rounded-xl shadow shadow-4 shadow-green-100">
+        <div className="flex flex-col items-center text-center py-10 gap-2 border border-2 border-green-400 bg-white rounded-xl shadow shadow-4 shadow-green-100">
           <p className="text-lg p-2 font-bold text-green-400 border border-gray-300 rounded-lg">Event created!</p>
           <p className="mt-2 font-bold text-green-600 my-4"> Your event PDA:<br></br> <code className="bg-green-200 rounded-xl p-2 text-xl">{eventPda}</code></p>
           <p className="mt-1 font-light text-black text-sm ">Transaction: <br></br><code>{txSignature}</code></p>

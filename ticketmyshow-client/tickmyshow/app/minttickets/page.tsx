@@ -267,11 +267,7 @@ export default function MintTicketPage() {
           onMintAndLock={mintAndLock}
         />
       )}
-      { ms1 && <div>{ms1}
-        
-          <div>Mint Successful: <div>{mintpk.toBase58()}</div></div>
-          
-        </div>}
+     
         
         {minted && <PrintmyTick/>}
     </div>
