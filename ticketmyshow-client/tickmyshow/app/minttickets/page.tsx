@@ -1,25 +1,41 @@
 "use client";
-
-import React, { useState, useEffect } from "react";
-import {
-  PublicKey,
-  SystemProgram,
-  Keypair,
-  SYSVAR_RENT_PUBKEY,
-  SYSVAR_INSTRUCTIONS_PUBKEY,
-} from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
-} from "@solana/spl-token";
-import { BN } from "@coral-xyz/anchor";
-
-import { useAnchorProgram, mintAndFreeze } from "../anchor/setup";
+import React, { useState, useMemo, useEffect } from "react";
+import { PublicKey, SystemProgram, Keypair, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+import { useConnection, useAnchorWallet } from "@solana/wallet-adapter-react";
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import idl from "../anchor/idl.json";
+import { Program, AnchorProvider} from "@coral-xyz/anchor";
 import { WalletButtonClient } from "../components/walletbutton";
 import MintTicketForm from "./mintform";
+import BN from "bn.js";
+import TicketQR from "../components/ticketQr";
 
-type TickmyshowProgram = any; 
+
+type TickmyshowProgram = {
+  methods: {
+    mintAndFreeze(): {
+      accounts: (accounts: {
+        payer: PublicKey;
+        event: PublicKey;
+        nftMint: PublicKey;
+        nftAccount: PublicKey;
+        tokenProgram: PublicKey;
+        associatedTokenProgram: PublicKey;
+        systemProgram: PublicKey;
+        rent: PublicKey;
+      }) => {
+        signers: (signers: Keypair[]) => {
+          rpc: () => Promise<string>;
+        };
+      };
+    };
+  };
+  account: {
+    event: {
+      fetch: (address: PublicKey) => Promise<EventAccountData>;
+    };
+  };
+};
 
 interface EventAccountData {
   creator: PublicKey;
@@ -33,6 +49,7 @@ interface EventAccountData {
 const MPL_TOKEN_METADATA_PROGRAM_ID = new PublicKey(
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 );
+
 
 function getTicketPDA(
   eventKey: PublicKey,
@@ -64,9 +81,43 @@ function getMasterEditionPDA(mint: PublicKey): [PublicKey, number] {
   );
 }
 
+// Add the missing mintAndFreeze function
+async function mintAndFreeze(
+  program: TickmyshowProgram,
+  payer: PublicKey,
+  mintKeypair: Keypair,
+  nftAccount: PublicKey,
+  eventPda: PublicKey
+): Promise<string> {
+  return program.methods
+    .mintAndFreeze()
+    .accounts({
+      payer: payer,
+      event: eventPda,
+      nftMint: mintKeypair.publicKey,
+      nftAccount: nftAccount,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
+    })
+    .signers([mintKeypair])
+    .rpc();
+}
+
 export default function MintTicketPage() {
-  const { program, wallet } = useAnchorProgram();
-  const publicKey = wallet.publicKey || null;
+  const { connection } = useConnection();
+  const wallet = useAnchorWallet() || { publicKey: null };
+
+  // Initialize the program
+  const program = useMemo(() => {
+    if (!wallet || !wallet.publicKey) return null;
+    const provider = new AnchorProvider(connection, wallet as any, AnchorProvider.defaultOptions());
+    const programId = new PublicKey(idl.address);
+    return new Program(idl as any,  provider) as unknown as TickmyshowProgram;
+  }, [connection, wallet]);
+
+  const publicKey = wallet?.publicKey || null;
 
   const [eventPdaInput, setEventPdaInput] = useState<string>("");
   const [eventPk, setEventPk] = useState<PublicKey | null>(null);
@@ -76,8 +127,13 @@ export default function MintTicketPage() {
   const [title, setTitle] = useState("");
   const [symbol, setSymbol] = useState("");
 
+  const [ms1, setms1] = useState("");
+  const [mintpk, setmintpk]:any = useState();
+  const [minted, setminted] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string>("");
+
 
   useEffect(() => {
     if (eventData && eventPk) {
@@ -93,7 +149,7 @@ export default function MintTicketPage() {
     setLoading(true);
     try {
       const pk = new PublicKey(eventPdaInput);
-      const ev: any = await (program as TickmyshowProgram).account.event.fetch(pk);
+      const ev: any = await program.account.event.fetch(pk);
       setEventData(ev);
       setEventPk(pk);
       setMessage(`Loaded event: ${ev.name}`);
@@ -105,6 +161,31 @@ export default function MintTicketPage() {
       setLoading(false);
     }
   }
+  const PrintmyTick = () => {
+    if (!eventData?.name || !eventData.date || !mintpk) {
+      return <p>Loading ticket…</p>;
+    }
+  
+    // Convert PublicKey to string
+    const mintStr = mintpk instanceof PublicKey
+      ? mintpk.toBase58()
+      : String(mintpk);
+      function bnToDate(bn: BN): Date {
+        return new Date(bn.toNumber() * 1000);
+      }
+  
+    const eventDateObj = bnToDate(eventData.date);
+  
+    return (
+      <div>
+        <TicketQR
+          eventName={eventData.name}
+          eventDate={eventDateObj}
+          mint={mintStr}
+        />
+      </div>
+    );
+  }
 
   async function mintAndLock() {
     if (!program || !publicKey || !eventPk || !eventData) {
@@ -115,34 +196,40 @@ export default function MintTicketPage() {
       return setMessage("Fill URI, title, symbol");
     }
 
+    
+
     setLoading(true);
     setMessage("⏳ Minting NFT…");
     try {
       const mintKeypair = Keypair.generate();
+      setmintpk(mintKeypair.publicKey);
       const mintPk = mintKeypair.publicKey;
-      const ata = await getAssociatedTokenAddress(mintPk, publicKey);
-      const [metaPda] = getMetadataPDA(mintPk);
-      const [editionPda] = getMasterEditionPDA(mintPk);
-      const [ticketPda] = getTicketPDA(eventPk, mintPk, program.programId);
-      const mintPubkey = mintKeypair.publicKey;
-
+      
+      // Get ATA for buyer
       const buyerAta = await getAssociatedTokenAddress(
-        mintPubkey,
-        publicKey,
-        /* allowOwnerOffCurve = */ false,
-        TOKEN_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID
+        mintPk,
+        publicKey
       );
-      // 1) Mint + Metadata + Master Edition + Ticket PDA
+      
+      // Mint and freeze the NFT
       const tx = await mintAndFreeze(
-        program!,
-        wallet.publicKey!,
+        program,
+        publicKey,
         mintKeypair,
         buyerAta,
         eventPk
       );
-      setMessage(`Mint+freeze successful: ${tx}`);
+      
+          setMessage(`Mint+freeze successful: ${tx} 
+              Mint: ${mintPk.toBase58()}
+              Tx:   ${tx}`);
+                    setms1(tx);
 
+      
+      setminted(true)
+      
+      
+      // Reload event data to see updated issued NFTs count
       await loadEvent();
     } catch (err: any) {
       setMessage("❌ Error: " + (err.message || err.toString()));
@@ -150,14 +237,17 @@ export default function MintTicketPage() {
     } finally {
       setLoading(false);
     }
-  }
+
+    
+    }
+  
 
   return (
-    <div className="container mx-auto p-6">
+    <div className="container mx-auto py-20 pb-96 p-6 bg-white">
       <WalletButtonClient />
-      {!wallet.connected ? (
+      {!publicKey ? (
         <div className="max-w-lg mx-auto mt-10 p-6 sm:p-8 bg-white rounded-xl shadow-lg border border-gray-200 text-center">
-          <h2 className="text-3xl font-bold mb-6 text-gray-800">Mint & Lock NFT Ticket</h2>
+          <h2 className="text-3xl font-bold mb-6 text-gray-800">Mint my Ticket</h2>
           <p className="text-gray-600 mb-6">Connect your wallet to continue</p>
         </div>
       ) : (
@@ -177,6 +267,13 @@ export default function MintTicketPage() {
           onMintAndLock={mintAndLock}
         />
       )}
+      { ms1 && <div>{ms1}
+        
+          <div>Mint Successful: <div>{mintpk.toBase58()}</div></div>
+          
+        </div>}
+        
+        {minted && <PrintmyTick/>}
     </div>
   );
 }

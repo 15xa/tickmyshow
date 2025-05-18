@@ -1,158 +1,94 @@
-import { useMemo } from "react";
-import {
-  useConnection,
-  useWallet,
-  WalletContextState,
-} from "@solana/wallet-adapter-react";
-import { AnchorProvider, Program, Idl, BN } from "@coral-xyz/anchor";
-import {
-  PublicKey,
-  SystemProgram,
-  Keypair,
-  SYSVAR_RENT_PUBKEY,
-  SYSVAR_CLOCK_PUBKEY,
-} from "@solana/web3.js";
+import * as anchor from "@coral-xyz/anchor";
+import { Program, BN } from "@coral-xyz/anchor";
 import idl from "./idl.json";
-import {
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+import { PublicKey, SystemProgram, Keypair, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 
-export const PROGRAM_ID = new PublicKey(idl.address);
-export type Tickmyshow = Idl;
-
-export function useAnchorProgram(): {
-  program: Program<Tickmyshow> | null;
-  provider: AnchorProvider | null;
-  wallet: WalletContextState;
-} {
-  const { connection } = useConnection();
-  const wallet = useWallet();
-  const provider = useMemo<AnchorProvider | null>(() => {
-    if (!wallet.publicKey) return null;
-    return new AnchorProvider(connection, wallet as any, {
-      commitment: "confirmed",
-    });
-  }, [connection, wallet]);
-  const program = useMemo<Program<Tickmyshow> | null>(() => {
-    if (!provider) return null;
-    return new Program<Tickmyshow>(idl as any, provider);
-  }, [provider]);
-  return { program, provider, wallet };
-}
-
-export function getEventPDA(
-  name: string,
-  date: number
-): [PublicKey, number] {
-  const dateBuf = new BN(date).toArrayLike(Buffer, "le", 8);
+export const getEventPDA = (name: string, date: BN, programId: PublicKey): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("event"), Buffer.from(name), dateBuf],
-    PROGRAM_ID
+    [Buffer.from("event"), Buffer.from(name), date.toBuffer("le", 8)],
+    programId
   );
+};
+
+async function main() {
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+
+  const programId = new PublicKey(idl.address);
+  const program = new Program(idl as any,  provider);
+  console.log("Program ID:", programId.toString());
+
+  const creatorWallet = provider.wallet as anchor.Wallet;
+  console.log("Creator/Payer Wallet:", creatorWallet.publicKey.toString());
+
+  const eventName = "Solana Summer Fest";
+  const eventDate = new BN(Math.floor(Date.now() / 1000) + 3600);
+  const eventCapacity = 500;
+
+  const [eventPda, eventBump] = getEventPDA(eventName, eventDate, programId);
+  console.log("Event PDA:", eventPda.toString(), "bump:", eventBump);
+
+  try {
+    const initTx = await program.methods
+      .initEvent(eventName, eventDate, eventCapacity)
+      .accounts({
+        event: eventPda,
+        creator: creatorWallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    console.log("Init transaction:", initTx);
+
+    const eventData = await (program as any).account.event.fetch(eventPda);
+    console.log("Event Data:", eventData);
+  } catch (error) {
+    console.error("Init error:", error);
+    const err = error as anchor.AnchorError;
+    if (err.error?.errorCode) console.error(err.error.errorCode.code, err.error.errorMessage);
+    if (err.logs) console.error(err.logs);
+    return;
+  }
+
+  console.log("--- Mint & Freeze NFT ---");
+
+  const payer = creatorWallet;
+  const mintKeypair = Keypair.generate();
+  const ata = await getAssociatedTokenAddress(mintKeypair.publicKey, payer.publicKey);
+
+  try {
+    const mintTx = await program.methods
+      .mintAndFreeze()
+      .accounts({
+        payer: payer.publicKey,
+        event: eventPda,
+        nftMint: mintKeypair.publicKey,
+        nftAccount: ata,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: SYSVAR_RENT_PUBKEY,
+      })
+      .signers([mintKeypair])
+      .rpc();
+    console.log("Mint tx:", mintTx);
+
+    const updated = await (program as any).account.event.fetch(eventPda);
+    console.log("Issued NFTs:", updated.issuedNfts);
+  } catch (error) {
+    console.error("Mint error:", error);
+    const err = error as anchor.AnchorError;
+    if (err.error?.errorCode) console.error(err.error.errorCode.code, err.error.errorMessage);
+    if (err.logs) console.error(err.logs);
+  }
 }
 
-export function getTicketPDA(
-  event: PublicKey,
-  nftMint: PublicKey
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("ticket"), event.toBuffer(), nftMint.toBuffer()],
-    PROGRAM_ID
+if (require.main === module) {
+  main().then(
+    () => console.log("Done."),
+    (err) => {
+      console.error(err);
+      process.exit(1);
+    }
   );
-}
-
-export function getGatePDA(
-  event: PublicKey,
-  entrypointId: string
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("entrypoint"),
-      event.toBuffer(),
-      Buffer.from(entrypointId),
-    ],
-    PROGRAM_ID
-  );
-}
-
-export function getCheckinPDA(
-  ticket: PublicKey,
-  timestamp: number
-): [PublicKey, number] {
-  const tsBuf = new BN(timestamp).toArrayLike(Buffer, "le", 8);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("checkin"), ticket.toBuffer(), tsBuf],
-    PROGRAM_ID
-  );
-}
-
-// Example wrappers for your common operations:
-
-export async function initEvent(
-  program: Program<Tickmyshow>,
-  creator: PublicKey,
-  name: string,
-  date: number,
-  capacity: number
-) {
-  const [eventPda] = getEventPDA(name, date);
-  return program.methods
-    .initEvent(name, new BN(date), capacity)
-    .accounts({
-      event: eventPda,
-      creator,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-}
-
-export async function mintAndFreeze(
-  program: Program<Tickmyshow>,
-  payer: PublicKey,
-  mintKeypair: Keypair,
-  buyerAta: PublicKey,
-  eventPda: PublicKey
-) {
-  return await program.methods
-    .mintAndFreeze()               
-    .accounts({
-      payer,                       
-      event: eventPda,
-      nftMint: mintKeypair.publicKey,
-      nftAccount: buyerAta,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-      rent: SYSVAR_RENT_PUBKEY,
-    })
-    .signers([mintKeypair])         
-    .rpc();
-}
-
-export async function checkIn(
-  program: Program<Tickmyshow>,
-  gateAgent: PublicKey,
-  eventPda: PublicKey,
-  gatePda: PublicKey,
-  ticketPda: PublicKey,
-  nftMint: PublicKey,
-  nftAta: PublicKey,
-  checkinPda: PublicKey
-) {
-  return program.methods
-    .checkIn()
-    .accounts({
-      event: eventPda,
-      gate: gatePda,
-      gateAgent,
-      nftMint,
-      nftAccount: nftAta,
-      ticket: ticketPda,
-      checkin: checkinPda,
-      tokenProgram: SystemProgram.programId /* replace with TOKEN_PROGRAM_ID */,
-      clock: SYSVAR_CLOCK_PUBKEY,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
 }

@@ -2,121 +2,10 @@
   "address": "5FFwn1xD4ae3kttPDNoHmnW2x2tfekLQXUbRiaj6mBeG",
   "metadata": {
     "name": "tickmyshow",
-    "version": "0.1.5",
+    "version": "0.1.7",
     "spec": "0.1.0"
   },
   "instructions": [
-    {
-      "name": "check_in",
-      "docs": [
-        "Thaw the frozen ATA, burn the NFT, and record a check‑in."
-      ],
-      "discriminator": [
-        209,
-        253,
-        4,
-        217,
-        250,
-        241,
-        207,
-        50
-      ],
-      "accounts": [
-        {
-          "name": "event",
-          "writable": true
-        },
-        {
-          "name": "ticket",
-          "writable": true
-        },
-        {
-          "name": "nft_mint",
-          "writable": true
-        },
-        {
-          "name": "nft_account",
-          "writable": true
-        },
-        {
-          "name": "checkin",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  101,
-                  99,
-                  107,
-                  105,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "ticket"
-              },
-              {
-                "kind": "account",
-                "path": "clock.unix_timestamp"
-              }
-            ]
-          }
-        },
-        {
-          "name": "gate_agent",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "gate",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  110,
-                  116,
-                  114,
-                  121,
-                  112,
-                  111,
-                  105,
-                  110,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "event"
-              },
-              {
-                "kind": "account",
-                "path": "gate.entrypoint_id",
-                "account": "GateAuthority"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "clock",
-          "address": "SysvarC1ock11111111111111111111111111111111"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": []
-    },
     {
       "name": "init_event",
       "discriminator": [
@@ -183,9 +72,6 @@
     },
     {
       "name": "mint_and_freeze",
-      "docs": [
-        "Mint one NFT to the buyer, reassign freeze authority to the Event PDA, then freeze the ATA."
-      ],
       "discriminator": [
         88,
         207,
@@ -347,19 +233,6 @@
   ],
   "accounts": [
     {
-      "name": "CheckInData",
-      "discriminator": [
-        188,
-        57,
-        165,
-        248,
-        8,
-        114,
-        17,
-        36
-      ]
-    },
-    {
       "name": "Event",
       "discriminator": [
         125,
@@ -371,59 +244,9 @@
         152,
         233
       ]
-    },
-    {
-      "name": "GateAuthority",
-      "discriminator": [
-        136,
-        181,
-        249,
-        63,
-        204,
-        74,
-        27,
-        108
-      ]
-    },
-    {
-      "name": "Ticket",
-      "discriminator": [
-        41,
-        228,
-        24,
-        165,
-        78,
-        90,
-        235,
-        200
-      ]
     }
   ],
   "types": [
-    {
-      "name": "CheckInData",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "ticket",
-            "type": "pubkey"
-          },
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
     {
       "name": "Event",
       "type": {
@@ -452,65 +275,6 @@
           {
             "name": "issued_nfts",
             "type": "u32"
-          }
-        ]
-      }
-    },
-    {
-      "name": "GateAuthority",
-      "docs": [
-        "Used by `mint_and_freeze` to re‑assign freeze authority"
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "event",
-            "type": "pubkey"
-          },
-          {
-            "name": "entrypoint_id",
-            "type": "string"
-          },
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Ticket",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "event",
-            "type": "pubkey"
-          },
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "nft_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "nft_account",
-            "type": "pubkey"
-          },
-          {
-            "name": "checked_in",
-            "type": "bool"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }

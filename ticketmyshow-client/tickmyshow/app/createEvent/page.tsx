@@ -24,7 +24,7 @@ export default function Home() {
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
-          <div className="p-6 max-w-3xl mx-auto">
+          <div className="p-6  mx-auto bg-white">
             <WalletMultiButton />
             <CreateEvent />
           </div>

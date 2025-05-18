@@ -29,7 +29,7 @@ export default function CreatePopup({ onSubmit, loading }: CreatePopupProps) {
   };
 
   return (
-    <div className="max-w-lg mx-auto mt-10 p-6 sm:p-8 bg-white rounded-xl shadow-lg border border-gray-200">
+    <div className="max-w-lg mx-auto mt-10 p-6 sm:p-8 bg-white rounded-xl shadow shadow-xl border border-2 border-gray-400">
       <h2 className="text-3xl font-bold mb-6 text-gray-800 text-center">Create New Event</h2>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>

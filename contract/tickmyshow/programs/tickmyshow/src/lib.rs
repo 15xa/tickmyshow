@@ -3,7 +3,6 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{self, Mint, TokenAccount, MintTo, FreezeAccount, SetAuthority, ThawAccount, Burn, Token},
 };
-use mpl_token_metadata::ID as TOKEN_METADATA_PROGRAM_ID; // if you ever need it
 
 declare_id!("5FFwn1xD4ae3kttPDNoHmnW2x2tfekLQXUbRiaj6mBeG");
 

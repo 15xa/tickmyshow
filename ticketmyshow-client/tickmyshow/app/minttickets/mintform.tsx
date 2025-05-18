@@ -91,57 +91,14 @@ export default function MintTicketForm({
 
         {eventData && (
           <>
-            <div>
-              <label htmlFor="metadataUri" className="block text-sm font-medium text-gray-700 mb-1">
-                Metadata URI
-              </label>
-              <input
-                id="metadataUri"
-                type="text"
-                value={uri}
-                onChange={(e) => setUri(e.target.value)}
-                placeholder="https://example.com/metadata.json"
-                className="w-full mt-1 p-3 text-black border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="nftTitle" className="block text-sm font-medium text-gray-700 mb-1">
-                NFT Title
-              </label>
-              <input
-                id="nftTitle"
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="My Event Ticket"
-                className="w-full mt-1 p-3 text-black border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="nftSymbol" className="block text-sm font-medium text-gray-700 mb-1">
-                NFT Symbol
-              </label>
-              <input
-                id="nftSymbol"
-                type="text"
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value)}
-                placeholder="TICKET"
-                className="w-full mt-1 p-3 text-black border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
-                disabled={loading}
-              />
-            </div>
-
+           
+             
             <button
               onClick={onMintAndLock}
               disabled={loading || eventData.issued_nfts >= eventData.capacity || !uri || !title || !symbol}
               className={`w-full bg-indigo-600 text-white py-3 px-4 rounded-md font-semibold hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition ease-in-out duration-150 ${loading || eventData.issued_nfts >= eventData.capacity || !uri || !title || !symbol ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              {loading ? 'Processing...' : 'Mint & Lock Ticket'}
+              {loading ? 'Processing...' : 'Mint my Ticket'}
             </button>
           </>
         )}
