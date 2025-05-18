@@ -243,12 +243,12 @@ export default function MintTicketPage() {
   
 
   return (
-    <div className="container mx-auto py-20 pb-96 p-6 bg-white">
+    <div className="container mx-auto py-20 pb-96 p-6 bg-[url('/mintpage_im_001.png')] bg-center bg-cover">
       <WalletButtonClient />
       {!publicKey ? (
         <div className="max-w-lg mx-auto mt-10 p-6 sm:p-8 bg-white rounded-xl shadow-lg border border-gray-200 text-center">
           <h2 className="text-3xl font-bold mb-6 text-gray-800">Mint my Ticket</h2>
-          <p className="text-gray-600 mb-6">Connect your wallet to continue</p>
+          <p className="text-red-600 font-semibold mb-6">Connect your wallet to continue</p>
         </div>
       ) : (
         <MintTicketForm 

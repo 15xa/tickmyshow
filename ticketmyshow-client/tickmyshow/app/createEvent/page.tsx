@@ -18,13 +18,19 @@ export default function Home() {
   const network = WalletAdapterNetwork.Devnet;
   const endpoint = useMemo(() => clusterApiUrl(network), [network]);
 
-  const wallets = useMemo(() => [], [network]); // Add wallets here later if needed
+  const wallets = useMemo(() => [], [network]); 
 
   return (
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
-          <div className="p-6  mx-auto bg-white">
+          <div className="p-6  mx-auto bg-cover bg-center"
+            style={{
+              backgroundImage: "url('/ticket_bg_gen_001.png')",
+              backgroundSize:   "cover",
+              backgroundPosition:"center",
+            }}>
+
             <WalletMultiButton />
             <CreateEvent />
           </div>
